@@ -495,18 +495,22 @@ namespace joinparty
         auto fee_handled = subtract_fee;
 
         // if we are expecting change back, pull the fee from there
-        if (!fee_handled &&  change_amount && (change_amount > estimated_fee))
+        if (change_amount)
         {
-            logger.info("Using change amount of",
-                change_amount, "back to our self");
-
             chain::operation::stack change_payment_ops =
                 chain::operation::to_pay_key_hash_pattern(
                     change_address.hash());
 
-            const uint64_t adjusted_amount = change_amount - estimated_fee;
+            uint64_t adjusted_amount = change_amount;
+            if (!fee_handled && (change_amount > estimated_fee))
+            {
+                adjusted_amount -= estimated_fee;
+            }
             const libbitcoin::chain::output change_output{
                 adjusted_amount, chain::script{change_payment_ops}};
+
+            logger.info("Using actual change amount of",
+                adjusted_amount, "back to our self");
 
             out_tx.outputs.push_back(change_output);
 
