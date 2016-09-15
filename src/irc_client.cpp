@@ -579,7 +579,8 @@ namespace joinparty {
         const chunk_list& chunks, const std::string& from, bool is_public)
     {
         const auto& encrypted = chunks[4];
-        logger.info("*** Handling encrypted ioauth from", from, ":", encrypted);
+        logger.debug(
+            "*** Handling encrypted ioauth from", from, ":", encrypted);
 
         joinparty::OrderState* order_state_ptr = nullptr;
         auto& order_states = order_manager_->get_order_states();
@@ -675,7 +676,7 @@ namespace joinparty {
         const chunk_list& chunks, const std::string& from, bool is_public)
     {
         const auto& encrypted = chunks[4];
-        logger.info("***", from, ": Handling sig encrypted:", encrypted);
+        logger.debug("***", from, ": Handling sig encrypted:", encrypted);
 
         joinparty::OrderState* order_state_ptr = nullptr;
         auto& order_states = order_manager_->get_order_states();

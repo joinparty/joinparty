@@ -488,7 +488,7 @@ namespace joinparty
 
         const auto tx_size = static_cast<float>(out_tx.serialized_size());
         logger.info("Using specified fee estimate of", estimated_fee,
-            "for tx of actual size", tx_size);
+            "for tx of size", tx_size);
 
         // for joins, if the subtract fee option was used, the fee has
         // already been subtracted from the total amount
@@ -511,6 +511,8 @@ namespace joinparty
 
             logger.info("Using actual change amount of",
                 adjusted_amount, "back to our self");
+            logger.info("***** SELF amount=", amount,
+                "change=", adjusted_amount);
 
             out_tx.outputs.push_back(change_output);
 

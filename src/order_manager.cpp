@@ -68,14 +68,11 @@ namespace joinparty
 
     void OrderManager::check_if_eligible_order(const Order& order)
     {
-        const auto blacklist_iter1 =
+        const auto blacklist_iter =
             std::find(blacklist_.begin(), blacklist_.end(), order.nick);
-        const auto blacklist_iter2 =
-            std::find(blacklist_.begin(), blacklist_.end(), order.nick + "_");
 
         if ((amount_ >= order.min_size) && (amount_ <= order.max_size) &&
-            (order.tx_fee > 0) && (blacklist_iter1 == blacklist_.end()) &&
-            (blacklist_iter2 == blacklist_.end()))
+            (order.tx_fee > 0) && (blacklist_iter == blacklist_.end()))
         {
             eligible_orders_.push_back(order);
             std::sort(eligible_orders_.begin(), eligible_orders_.end(),

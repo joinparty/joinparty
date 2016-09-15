@@ -219,8 +219,8 @@ static bool broadcast_transaction(
             settings.selected_unspent_list, settings.coin_join_tx);
 
         const auto ret =
-            (settings.wallet->send_transaction(settings.coin_join_tx) &&
-                 settings.wallet->transaction_is_valid(settings.coin_join_tx));
+            (settings.wallet->transaction_is_valid(settings.coin_join_tx) &&
+                 settings.wallet->send_transaction(settings.coin_join_tx));
         if (ret)
         {
             joinparty::wallet_utils::update_index_cache(
@@ -356,8 +356,8 @@ static int initiate_join_payment(Settings& settings)
         settings.selected_unspent_list, settings.change_address,
             settings.change_amount, settings.mix_depth, settings.amount))
     {
-        throw std::runtime_error("Failed to retrieve unspent outputs required "
-            "for this transaction");
+        throw std::runtime_error("Failed to retrieve enough unspent outputs "
+            "required for this transaction from this mix depth");
     }
 
     // we have to come up with an estimated fee here based on our
@@ -533,10 +533,18 @@ int main(int argc, char** argv)
             {
                 const auto blacklist = args["blacklist"].as<std::string>();
                 boost::split(settings.blacklist, blacklist, boost::is_any_of(","));
+
+                std::vector<std::string> alias_blacklist;
+                alias_blacklist.reserve(settings.blacklist.size());
+
                 for(const auto& maker : settings.blacklist)
                 {
                     logger.info("Added maker", maker, "to the blacklist");
+                    alias_blacklist.emplace_back(maker + "_");
+                    logger.debug("Added maker", maker + "_", "to the blacklist");
                 }
+                settings.blacklist.insert(settings.blacklist.end(),
+                    alias_blacklist.begin(), alias_blacklist.end());
             }
 
             settings.num_joins = args["numcoinjoins"].as<uint32_t>();

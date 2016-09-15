@@ -82,5 +82,7 @@ popd > /dev/null # install_dir
 make -j $num_cpus
 make install
 
-echo "Adding $install_dir/lib to LD_LIBRARY_PATH"
+echo "In your shell, set the LD_LIBRARY_PATH to include $install_dir"
+echo "e.g. In bash, type:"
+echo "export LD_LIBRARY_PATH=$install_dir:$LD_LIBRARY_PATH"
 export LD_LIBRARY_PATH=$install_dir/lib:$LD_LIBRARY_PATH
