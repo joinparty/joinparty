@@ -37,8 +37,8 @@ namespace joinparty {
     static const std::string command_error = command_prefix + "error";
     static const std::string command_pubkey = command_prefix + "pubkey";
     static const std::string command_ioauth = command_prefix + "ioauth";
-    static const std::string command_absorder = command_prefix + "absorder";
-    static const std::string command_relorder = command_prefix + "relorder";
+    static const std::string command_absoffer = command_prefix + "absoffer";
+    static const std::string command_reloffer = command_prefix + "reloffer";
     static const std::string command_orderbook = command_prefix + "orderbook";
 
     IrcClient::IrcClient(
@@ -242,15 +242,58 @@ namespace joinparty {
 
     // ***************** Begin Taker Callbacks ******************
 
-    void IrcClient::fill_order(const joinparty::OrderState& order_state,
-        const joinparty::encryption::EncPublicKey taker_pub_key,
-        uint32_t cj_amount)
+    void IrcClient::fill_order(
+        joinparty::OrderState& order_state, uint32_t cj_amount)
     {
+        const auto wallet = order_manager_->get_wallet();
+        if (wallet == nullptr)
+        {
+            throw std::runtime_error(
+                "Wallet has not been set in the order_manager class!");
+        }
+
+        static constexpr size_t num_confirms = 6;
+        static constexpr size_t utxo_percent = 20;
+        static constexpr char commit_type_byte = 'P';
+        const auto current_block_height = wallet->get_current_block_height();
+
+        joinparty::encryption::generate_podle(order_state.commitments,
+            order_state.unspent_list, cj_amount, current_block_height,
+            num_confirms, utxo_percent, order_state.nums_index);
+
         std::stringstream ss;
-        ss << "privmsg " << order_state.order.nick << " :"
-           << command_fill << " ";
-        ss << order_state.order.order_id << " " << cj_amount << " ";
-        ss << libbitcoin::encode_base16(taker_pub_key) << " ~";
+        ss << "privmsg " << order_state.order.nick << " :" <<
+            command_fill << " ";
+
+        std::stringstream message_to_be_signed;
+        message_to_be_signed << order_state.order.order_id << " " << cj_amount
+            << " " << libbitcoin::encode_base16(
+                order_state.taker_key_pair.pub_key) << " " << commit_type_byte
+                    << libbitcoin::encode_base16(order_state.commitments[
+                        order_state.commitment_index].commitment);
+
+        ss << message_to_be_signed.str();
+
+        message_to_be_signed << network_;
+        libbitcoin::ec_compressed pub;
+        libbitcoin::secret_to_public(pub, order_state.nick_info.priv_key);
+
+        const auto message_chunk =
+            libbitcoin::to_chunk(message_to_be_signed.str());
+        const auto sig = joinparty::encryption::get_encoded_signed_message(
+            message_chunk, order_state.nick_info.priv_key, true);
+
+        // debugging (verify using our own nick)
+        if (!joinparty::encryption::verify_nick_signature(
+                 order_state.nick_info.pub_key, order_state.nick_info.nick,
+                     sig, message_to_be_signed.str(), network_))
+        {
+            throw std::runtime_error(
+                "Failed to validate newly generated nick signature");
+        }
+        ss << " " << libbitcoin::encode_base16(order_state.nick_info.pub_key);
+        ss << " " << sig;
+        ss << " ~";
 
         logger.info(">>", ss.str());
 
@@ -273,12 +316,35 @@ namespace joinparty {
                     libbitcoin::encode_base64(tx.to_data()),
                         order_state.shared_key);
 
+            libbitcoin::ec_compressed pub;
+            libbitcoin::secret_to_public(pub, order_state.nick_info.priv_key);
+
+            const auto sig = joinparty::encryption::get_encoded_signed_message(
+                libbitcoin::to_chunk(encrypted_message + network_),
+                    order_state.nick_info.priv_key, true);
+
+            // debugging (verify using our own nick)
+            if (!joinparty::encryption::verify_nick_signature(
+                    order_state.nick_info.pub_key, order_state.nick_info.nick,
+                    sig, encrypted_message + network_, network_))
+            {
+                throw std::runtime_error(
+                    "Failed to validate newly generated nick signature");
+            }
+
+            std::stringstream ss;
+            ss << encrypted_message;
+            ss << " " << libbitcoin::encode_base16(order_state.nick_info.pub_key);
+            ss << " " << sig;
+            const auto encrypted = ss.str();
+            logger.debug("*** Writing tx data:", encrypted);
+
             const auto header = "PRIVMSG " + order_state.order.nick + " ";
-            auto write_fn = [&order_state, this, i, header,
-                num_order_states, encrypted_message](
+            auto write_fn =
+                [&order_state, this, i, header, num_order_states, encrypted](
                     const boost::system::error_code error)
             {
-                write_chunked_message(header, command_tx, encrypted_message,
+                write_chunked_message(header, command_tx, encrypted,
                     (i != (num_order_states - 1)), *order_state.request.get(),
                         *order_state.response.get());
             };
@@ -362,7 +428,7 @@ namespace joinparty {
 
         const auto msg_type = chunks[3].substr(1, chunks[3].size());
         if (!is_public &&
-            ((msg_type == command_absorder) || (msg_type == command_relorder)))
+            ((msg_type == command_absoffer) || (msg_type == command_reloffer)))
         {
             return handle_orderbook_entries(chunks, from, is_public);
         }
@@ -411,7 +477,7 @@ namespace joinparty {
     bool IrcClient::handle_end_of_names_list(
         const std::string& line, const chunk_list& chunks)
     {
-        logger.info("Connected to IRC and joined channel");
+        logger.info("Connected to IRC and joined channel", channel_);
 
         // send !orderbook
         write_command("privmsg " + channel_ + " " + command_orderbook, false);
@@ -425,13 +491,35 @@ namespace joinparty {
         return true;
     }
 
+    bool IrcClient::handle_network(
+        const std::string& line, const chunk_list& chunks)
+    {
+        const auto network_key = "NETWORK=";
+        if (line.find(network_key) != std::string::npos)
+        {
+            chunk_list tmp1;
+            boost::split(tmp1, line, boost::is_any_of(" "));
+            for(const auto& t : tmp1)
+            {
+                if (t.find(network_key) != std::string::npos)
+                {
+                    network_ = t.substr(8);
+                    logger.info("Assigned network to", network_);
+                    break;
+                }
+            }
+        }
+        return true;
+    }
+
+
     // *************** End IRC Command Handlers ***************
 
     bool IrcClient::handle_orderbook_entries(
         const chunk_list& chunks, const std::string& from, bool is_public)
     {
-        constexpr auto chunk_start_index = 3;
-        constexpr auto order_segment_count = 6;
+        static constexpr size_t chunk_start_index = 3;
+        static constexpr size_t order_segment_count = 6;
 
         if (is_public)
         {
@@ -441,11 +529,29 @@ namespace joinparty {
             return true;
         }
 
+        const auto chunk_len = chunks.size();
+        const auto pub_key = libbitcoin::wallet::ec_public(chunks[chunk_len-3]);
+        const auto signature = chunks[chunk_len-2];
+        if (chunks[chunk_len-1][0] != '~')
+        {
+            logger.info("Possibly invalid message from", from,
+                "-- ignoring message:", libbitcoin::join(chunks));
+        }
+
+        if (!joinparty::encryption::verify_nick_signature(
+                pub_key, from, signature, chunks, chunk_start_index + 1,
+                    chunk_len - 3, network_))
+        {
+            logger.debug("[orderbook] Failed to verify nick signature",
+                signature, "from", from,"-- ignoring message");
+            return true;
+        }
+
         // make a pass, flattening out all tokens and making them
         // easier to parse since we now know exactly the format they
-        // should be in
+        // should be in (the -3 is for the v2 additions)
         std::stringstream order_stream;
-        for(auto i = chunk_start_index; i < chunks.size(); i++)
+        for(auto i = chunk_start_index; i < chunk_len - 3; i++)
         {
             chunk_list tokens;
             boost::split(tokens, chunks[i], boost::is_any_of(":!"));
@@ -455,7 +561,7 @@ namespace joinparty {
                 boost::algorithm::trim_if(
                     tokens[j], boost::algorithm::is_any_of(" "));
 
-                if ((tokens[j] == ":") || (tokens[j] == "~"))
+                if (tokens[j] == ":")
                 {
                     continue;
                 }
@@ -465,8 +571,7 @@ namespace joinparty {
         }
 
         auto orders = order_stream.str();
-        boost::algorithm::trim_if(
-            orders, boost::algorithm::is_any_of(" "));
+        boost::algorithm::trim_if(orders, boost::algorithm::is_any_of(" "));
 
         // now we can split the flattened orders into pieces that
         // should be divisble by 6 in count
@@ -482,11 +587,11 @@ namespace joinparty {
         for(auto i = 0; i < tokens.size(); i += order_segment_count)
         {
             OrderType order_type;
-            if (tokens[i] == "absorder")
+            if (tokens[i] == "absoffer")
             {
                 order_type = OrderType::Absolute;
             }
-            else if (tokens[i] == "relorder")
+            else if (tokens[i] == "reloffer")
             {
                 order_type = OrderType::Relative;
             }
@@ -503,8 +608,8 @@ namespace joinparty {
             const OrderFee tx_fee = std::atof(tokens[i+4].c_str());
             const OrderFee cj_fee = std::atof(tokens[i+5].c_str());
 
-            order_manager_->add_order(
-                from, order_type, order_id, min_size, max_size, tx_fee, cj_fee);
+            order_manager_->add_order(from, order_type, order_id,
+                min_size, max_size, tx_fee, cj_fee, pub_key);
         }
         return true;
     }
@@ -526,51 +631,66 @@ namespace joinparty {
         {
             joinparty::encryption::init_shared_key(
                 order_state.taker_key_pair.priv_key, order_state.maker_pub_key,
-                order_state.shared_key);
+                    order_state.shared_key);
 
-            // use the first available utxo's key for btc signing
-            JP_ASSERT(order_state.unspent_list.size() > 0);
-            const auto& key = order_state.unspent_list.front().first;
-            const auto btc_pub_key = joinparty::utils::public_from_private(key);
+            const size_t max_commitment_index =
+              (order_state.commitments.size() - 1);
+            if (order_state.commitment_index > max_commitment_index)
+            {
+                std::stringstream error_msg;
+                error_msg << "Invalid commitment index of ";
+                error_msg << order_state.commitment_index << " specified.  ";
+                error_msg << "Max commitment index for this transaction is ";
+                error_msg << max_commitment_index;
 
-            const auto taker_pub_key = libbitcoin::encode_base16(
-                order_state.taker_key_pair.pub_key);
-            const auto btc_signature =
-                joinparty::encryption::get_encoded_signed_message(
-                    to_chunk(taker_pub_key), key);
-
-            std::stringstream inner_ss;
-            inner_ss << libbitcoin::encode_base16(btc_pub_key)
-                << " " << btc_signature;
+                throw std::runtime_error(error_msg.str());
+            }
 
             const auto encrypted_message =
-                joinparty::encryption::encrypt_message(
-                    inner_ss.str(), order_state.shared_key);
+                joinparty::encryption::encrypt_message(order_state.commitments[
+                    order_state.commitment_index].serialized_revelation,
+                        order_state.shared_key);
+
+            libbitcoin::ec_compressed pub;
+            libbitcoin::secret_to_public(pub, order_state.nick_info.priv_key);
+
+            const auto sig = joinparty::encryption::get_encoded_signed_message(
+                libbitcoin::to_chunk(encrypted_message + network_),
+                    order_state.nick_info.priv_key, true);
+
+            // debugging (verify using our own nick)
+            if (!joinparty::encryption::verify_nick_signature(
+                    order_state.nick_info.pub_key, order_state.nick_info.nick,
+                    sig, encrypted_message + network_, network_))
+            {
+                throw std::runtime_error(
+                    "Failed to validate newly generated nick signature");
+            }
 
             std::stringstream ss;
-            ss << "PRIVMSG " << order_state.order.nick << " :";
-            ss << command_auth << " " << encrypted_message << " ~";
+            ss << encrypted_message;
+            ss << " " << libbitcoin::encode_base16(order_state.nick_info.pub_key);
+            ss << " " << sig;
+            logger.debug("*** Writing auth data:", ss.str());
 
             // suppress the read issued from the write, but return
             // true so the caller will issue a new read for us
-            write_command(ss.str(), true, *order_state.request.get(),
-                *order_state.response.get());
+            const auto header = "PRIVMSG " + order_state.order.nick + " ";
+            write_chunked_message(header, command_auth, ss.str(),
+                true, *order_state.request.get(),
+                    *order_state.response.get());
+
             return true;
         };
 
-        auto& order_states = order_manager_->get_order_states();
-        for(auto& order_state : order_states)
+        auto& order_state = order_manager_->get_order_state(from);
+        if (libbitcoin::decode_base16(order_state.maker_pub_key, pub_key_str))
         {
-            if ((order_state.order.nick == from) &&
-                (libbitcoin::decode_base16(
-                    order_state.maker_pub_key, pub_key_str)))
-            {
-                logger.info("*** Matched Maker Pubkey",
-                    libbitcoin::encode_base16(order_state.maker_pub_key),
-                        "from:", from);
+            logger.info("*** Matched Maker Pubkey",
+                libbitcoin::encode_base16(order_state.maker_pub_key),
+                    "from:", from);
 
-                return start_encryption(order_state);
-            }
+            return start_encryption(order_state);
         }
         return true;
     }
@@ -578,30 +698,36 @@ namespace joinparty {
     bool IrcClient::handle_ioauth(
         const chunk_list& chunks, const std::string& from, bool is_public)
     {
+        static constexpr size_t chunk_start_index = 3;
+        static constexpr size_t order_segment_count = 6;
+
         const auto& encrypted = chunks[4];
         logger.debug(
             "*** Handling encrypted ioauth from", from, ":", encrypted);
 
-        joinparty::OrderState* order_state_ptr = nullptr;
-        auto& order_states = order_manager_->get_order_states();
-        for(auto& cur_order_state : order_states)
+        const auto chunk_len = chunks.size();
+        const auto pub_key = libbitcoin::wallet::ec_public(chunks[chunk_len-3]);
+        const auto signature = chunks[chunk_len-2];
+        if (chunks[chunk_len-1][0] != '~')
         {
-            if (cur_order_state.order.nick == from)
-            {
-                order_state_ptr = &cur_order_state;
-                break;
-            }
+            logger.info("Possibly invalid message from", from,
+                "-- ignoring message:", libbitcoin::join(chunks));
         }
 
-        if (!order_state_ptr)
+        if (!joinparty::encryption::verify_nick_signature(
+                pub_key, from, signature, chunks, chunk_start_index + 1,
+                    chunk_len - 3, network_))
         {
-            throw std::runtime_error("Corrupt order state for user " + from);
+            logger.info("[ioauth] Failed to verify nick signature",
+                signature, "from", from,"-- ignoring message");
+            return true;
         }
-        auto& order_state = *order_state_ptr;
+        
+        auto& order_state = order_manager_->get_order_state(from);
 
         // auth the counterparty
         // !ioauth <utxo list> <coinjoin pubkey> <change address>
-        // <btc sig of maker encryption pubkey using coinjoin pubkey>
+        // <btc sig of maker encryption pubkey using coinjoin pubkey> (NS)
         const auto decrypted = joinparty::encryption::decrypt_message(
             encrypted, order_state.shared_key);
         logger.info("***", order_state.order.nick,
@@ -610,7 +736,7 @@ namespace joinparty {
         chunk_list fields;
         boost::split(fields, decrypted, boost::is_any_of(" "));
 
-        if (fields.size() != 4)
+        if (fields.size() != 5)
         {
             throw std::runtime_error("Ioauth response from maker " +
                                      from + " is not properly formatted");
@@ -641,10 +767,12 @@ namespace joinparty {
 
         order_state.coin_join_pub_key =
             libbitcoin::wallet::ec_public(fields[1]);
-        order_state.maker_change_address =
+        order_state.maker_coin_join_address =
             libbitcoin::wallet::payment_address(fields[2]);
+        order_state.maker_change_address =
+            libbitcoin::wallet::payment_address(fields[3]);
 
-        const auto btc_signature = fields[3];
+        const auto btc_signature = fields[4];
         const auto maker_pub_key =
             libbitcoin::encode_base16(order_state.maker_pub_key);
 
@@ -675,28 +803,34 @@ namespace joinparty {
     bool IrcClient::handle_sig(
         const chunk_list& chunks, const std::string& from, bool is_public)
     {
+        static constexpr size_t chunk_start_index = 3;
+        static constexpr size_t order_segment_count = 6;
+
         const auto& encrypted = chunks[4];
         logger.debug("***", from, ": Handling sig encrypted:", encrypted);
 
-        joinparty::OrderState* order_state_ptr = nullptr;
-        auto& order_states = order_manager_->get_order_states();
-        for(auto& cur_order_state : order_states)
+        const auto chunk_len = chunks.size();
+        const auto pub_key = libbitcoin::wallet::ec_public(chunks[chunk_len-3]);
+        const auto signature = chunks[chunk_len-2];
+        if (chunks[chunk_len-1][0] != '~')
         {
-            if (cur_order_state.order.nick == from)
-            {
-                order_state_ptr = &cur_order_state;
-                break;
-            }
+            logger.info("Possibly invalid message from", from,
+                "-- ignoring message:", libbitcoin::join(chunks));
         }
 
-        if (!order_state_ptr)
+        if (!joinparty::encryption::verify_nick_signature(
+                pub_key, from, signature, chunks, chunk_start_index + 1,
+                    chunk_len - 3, network_))
         {
-            throw std::runtime_error("Corrupt order state for user " + from);
+            logger.info("[sig] Failed to verify nick signature",
+                signature, "from", from,"-- ignoring message");
+            return true;
         }
-        auto& order_state = *order_state_ptr;
+
+        auto& order_state = order_manager_->get_order_state(from);
 
         // verify the signature from the maker 
-        // !sig <signature>
+        // !sig <signature> (NS)
         const auto b64_sig = joinparty::encryption::decrypt_message(
             encrypted, order_state.shared_key);
         logger.info("***", order_state.order.nick,
@@ -716,21 +850,21 @@ namespace joinparty {
                 "Wallet has not been set in the order_manager class!");
         }
 
-        const auto maker_pub_key = libbitcoin::to_chunk(order_state.maker_pub_key);
         auto& tx = *order_manager_->get_order_transaction();
         for(auto& utxo : order_state.maker_utxo_list)
         {
-            libbitcoin::chain::transaction output_tx;
-            wallet->get_transaction_info(utxo.hash, output_tx);
+            libbitcoin::chain::transaction output_tx{};
+
+            wallet->get_transaction_info(utxo.hash(), output_tx);
             const auto& previous_output_script =
-                output_tx.outputs[utxo.index].script;
+                output_tx.outputs()[utxo.index()].script();
 
             // set signed script on the input, but first find the
             // input's index in the tx we're building
             uint32_t input_index = std::numeric_limits<uint32_t>::max();
-            for(uint32_t i = 0; i < tx.inputs.size(); i++)
+            for(uint32_t i = 0; i < tx.inputs().size(); i++)
             {
-                if (tx.inputs[i].previous_output == utxo)
+                if (tx.inputs()[i].previous_output() == utxo)
                 {
                     input_index = i;
                     break;
@@ -742,13 +876,18 @@ namespace joinparty {
                 throw std::runtime_error(
                     "Cannot find input that matches the provided signature!");
             }
-            tx.inputs[input_index].script = script_signature;
+            tx.inputs()[input_index].set_script(script_signature);
 
             // validate input
-            if (!libbitcoin::chain::script::verify(script_signature,
-                previous_output_script, tx, input_index, 0xFFFFFF))
+            const auto ret = libbitcoin::chain::script::verify(
+                tx, input_index, previous_output_script, 0xFFFFFFFF);
+            if (ret != libbitcoin::error::success)
             {
-                throw std::runtime_error("Maker signature is invalid");
+                const std::string error =
+                    ((ret == libbitcoin::error::validate_inputs_failed) ?
+                        "validate inputs failed" : "operation failed");
+                throw std::runtime_error(
+                    "Maker signature is invalid: " + error);
             }
         }
 
@@ -758,11 +897,11 @@ namespace joinparty {
         // call the previously registered finalize tx callback method
         // to set the signature on each of the inputs in the tx until
         // all are collected before being broadcast
-        auto broadcast_tx = [&]()
+        auto broadcast_tx = [this, &order_state]()
         {
             // sign our inputs here
             order_manager_->broadcast_tx_cb(
-                order_manager_->get_order_transaction(), order_state_ptr);
+                order_manager_->get_order_transaction(), &order_state);
         };
 
         socket_.get_io_service().post(broadcast_tx);
@@ -805,6 +944,8 @@ namespace joinparty {
               { return handle_quit(line, chunks); } },
             { "PRIVMSG", [this](const std::string& line, const chunk_list& chunks)
               { return handle_privmsg(line, chunks); } },
+            { "005", [this](const std::string& line, const chunk_list& chunks)
+              { return handle_network(line, chunks); } },
             { "332", [this](const std::string& line, const chunk_list& chunks)
               { return handle_topic(line, chunks); } },
             { "366", [this](const std::string& line, const chunk_list& chunks)

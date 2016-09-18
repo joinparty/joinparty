@@ -44,18 +44,24 @@ struct Order
 {
     Order() {}
     Order(const std::string& nickname, const OrderType otype,
-          const OrderID oid, const OrderSize min,
-          const OrderSize max, const OrderFee tx, const OrderFee cj) :
-    order_type(otype), order_id(oid), min_size(min),
-        max_size(max), tx_fee(tx), cj_fee(cj), nick(nickname) {}
+        const OrderID oid, const OrderSize min,
+        const OrderSize max, const OrderFee tx, const OrderFee cj,
+        const libbitcoin::wallet::ec_public& pub) :
+    nick(nickname), order_type(otype),
+        order_id(oid), min_size(min),
+        max_size(max), tx_fee(tx), cj_fee(cj),
+        nick_pub_key(pub) {}
 
+    std::string nick;
     OrderType order_type = OrderType::Unknown;
     OrderID order_id = null_order_id;
     OrderSize min_size = 0;
     OrderSize max_size = 0;
     OrderFee tx_fee = 0;
     OrderFee cj_fee = 0;
-    std::string nick;
+
+    // used only for the nick signature
+    libbitcoin::wallet::ec_public nick_pub_key;
 };
 
 typedef std::vector<Order> OrderList;

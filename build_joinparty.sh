@@ -82,7 +82,13 @@ popd > /dev/null # install_dir
 make -j $num_cpus
 make install
 
+echo ""
+echo ""
+echo "Joinparty build is complete!"
+echo ""
+echo "*******************************************************************"
 echo "In your shell, set the LD_LIBRARY_PATH to include $install_dir"
 echo "e.g. In bash, type:"
-echo "export LD_LIBRARY_PATH=$install_dir:$LD_LIBRARY_PATH"
+echo "export LD_LIBRARY_PATH=$install_dir/lib:$LD_LIBRARY_PATH"
 export LD_LIBRARY_PATH=$install_dir/lib:$LD_LIBRARY_PATH
+echo "*******************************************************************"

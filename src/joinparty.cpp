@@ -37,8 +37,9 @@ static const std::vector<std::string> libbitcoin_server_addresses
 {
     "tcp://libbitcoin1.openbazaar.org:9091",
     "tcp://libbitcoin2.openbazaar.org:9091",
-    "tcp://libbitcoin3.openbazaar.org:9091",
-    "tcp://obelisk.airbitz.co:9091"
+// these servers appear to be down
+//    "tcp://libbitcoin3.openbazaar.org:9091",
+//    "tcp://obelisk.airbitz.co:9091",
 };
 
 static const auto irc_port = "6697";
@@ -63,6 +64,8 @@ struct Settings
     uint32_t mix_depth;
     uint32_t subtract_fee;
     uint32_t num_joins;
+    uint32_t commitment_index;
+    uint32_t retry_index;
 
     uint64_t amount;
     uint64_t change_amount;
@@ -70,15 +73,18 @@ struct Settings
     uint64_t estimated_fee;
     uint64_t total_maker_fee;
 
-    std::string nick;
     std::string wallet_file;
 
     std::vector<std::string> servers;
     std::vector<std::string> blacklist;
+    std::vector<std::string> preferred;
+    std::vector<std::string> excluded;
 
     boost::asio::io_service io_service;
 
     size_t num_maker_responses_remaining;
+
+    joinparty::encryption::NickInfo nick_info;
 
     libbitcoin::chain::transaction coin_join_tx;
     libbitcoin::wallet::payment_address destination;
@@ -109,9 +115,12 @@ static void parse_arguments(int argc, char** argv, variables_map& args)
          "Required: use the specified wallet file")
         ("server,S", value<std::string>(),
          "Optional: The url of a libbitcoin server to use "
-         "(default is tcp://localhost:9091)")
+         "(default is a random address that may or may not be up)")
         ("blacklist,B", value<std::string>(),
          "Optional: A comma separated list of maker nicknames to avoid join "
+         "attempts with (default is none)")
+        ("preferred,P", value<std::string>(),
+         "Optional: A comma separated list of maker nicknames to prefer join "
          "attempts with (default is none)")
         ("sendpayment,s", "send a payment (requires -m, -d, and -a)")
         ("joinpayment,j", "send a coinjoin payment "
@@ -124,6 +133,13 @@ static void parse_arguments(int argc, char** argv, variables_map& args)
          "The bitcoin payment address")
         ("numcoinjoins,n", value<uint32_t>(),
          "The number of parties to join with")
+        ("commitmentindex,C", value<int32_t>(),
+         "The index of commitment to use for this coin join; default is 0")
+        ("retryindex,R", value<int32_t>(),
+         "The retry attempt number of the commitment to use for this coin "
+         "join; default is 0")
+        ("exclude,E", value<std::string>(),
+         "Exclude utxos from the comma separated list of bitcoin addresses")
         ("amount,a", value<uint64_t>(),
          "The bitcoin amount in Satoshis")
         ("subtractfee,F", value<uint32_t>(),
@@ -232,8 +248,8 @@ static bool broadcast_transaction(
                 settings.wallet_file, settings.wallet_map);
         }
 
-        logger.debug("Transaction is", (ret ? "Valid" : "Invalid"),
-            tx->to_string(0xFFFFFFFF));
+        logger.info("Transaction is", (ret ? "Valid" : "Invalid"));
+        logger.info(tx->to_string(0xFFFFFFFF));
 
         settings.irc_client->logout();
         return ret;
@@ -246,7 +262,6 @@ static bool broadcast_transaction(
         settings.irc_client->issue_read();
     }
     return false;
-    
 }
 
 // a callback called after we've heard from all of the makers and it's
@@ -273,7 +288,6 @@ static bool construct_transaction(
                 "Failed to create coin join transaction");
         }
 
-        settings.order_manager->set_wallet(settings.wallet);
         settings.order_manager->set_order_transaction(&settings.coin_join_tx);
 
         settings.order_manager->register_broadcast_tx_cb(
@@ -283,6 +297,8 @@ static bool construct_transaction(
             return broadcast_transaction(settings, tx, order_state);
         });
 
+        logger.debug("Sending unsigned transaction now ...",
+            settings.coin_join_tx.to_string(0xFFFFFFFF));
         logger.info("Sending unsigned transaction now ...");
 
         auto send_transaction = [&settings]()
@@ -310,6 +326,8 @@ static bool construct_transaction(
 static int process_join_orders(
     Settings& settings, const boost::system::error_code& ec)
 {
+    settings.order_manager->set_wallet(settings.wallet);
+
     // determine the orders to fill for our join and declare our
     // intention to fill them to the maker
     settings.num_maker_responses_remaining = settings.num_joins;
@@ -323,9 +341,10 @@ static int process_join_orders(
             (uint32_t)order.min_size, (uint32_t)order.max_size,
             (float)order.tx_fee, (float)order.cj_fee);
 
-        settings.order_manager->add_order_state(
-            joinparty::OrderState(
-                order, settings.selected_unspent_list, settings.key_pair));
+        settings.order_manager->add_order_state(joinparty::OrderState(
+            order, settings.selected_unspent_list, settings.key_pair,
+                settings.nick_info, settings.commitment_index,
+                    settings.retry_index));
 
         // set a callback that will be called when it's time to
         // construct the actual bitcoin transaction
@@ -341,8 +360,7 @@ static int process_join_orders(
             auto& order_state =
                 settings.order_manager->get_order_states()[i];
 
-            settings.irc_client->fill_order(
-                order_state, settings.key_pair.pub_key, settings.amount);
+            settings.irc_client->fill_order(order_state, settings.amount);
         });
     }
     return 0;
@@ -354,7 +372,8 @@ static int initiate_join_payment(Settings& settings)
 {
     if (!settings.wallet->retrieve_unspent_and_change_address(
         settings.selected_unspent_list, settings.change_address,
-            settings.change_amount, settings.mix_depth, settings.amount))
+            settings.change_amount, settings.mix_depth, settings.amount,
+                &settings.excluded))
     {
         throw std::runtime_error("Failed to retrieve enough unspent outputs "
             "required for this transaction from this mix depth");
@@ -371,14 +390,45 @@ static int initiate_join_payment(Settings& settings)
 
     settings.estimated_fee = settings.target_fee_per_kb *
         static_cast<float>(
-            (estimated_tx_size / 1024)) / settings.num_joins;
+            (static_cast<float>(estimated_tx_size) / 1024) /
+                settings.num_joins);
 
+    logger.info("Target fee per KB is", settings.target_fee_per_kb,
+        "and the estimated tx size is", estimated_tx_size);
     logger.info("Estimated fee is", settings.estimated_fee);
 
     // adjust the destination amount if we're pulling the fee from it
     if (settings.subtract_fee)
     {
+        if (settings.amount <= settings.estimated_fee)
+        {
+            throw std::runtime_error("Cannot subtract fee from amount -- "
+                "not enough unspent outputs required for this transaction "
+                "from this mix depth");
+        }
         settings.amount -= settings.estimated_fee;
+    }
+    else
+    {
+        // make sure that our utxos can cover both the amount and the
+        // estimated fee
+        const uint64_t target_amount = settings.amount + settings.estimated_fee;
+        uint64_t input_total = 0;
+        for(const auto& unspent : settings.selected_unspent_list)
+        {
+            input_total += unspent.second.value;
+            if (input_total >= target_amount)
+            {
+                break;
+            }
+        }
+
+        if (input_total < target_amount)
+        {
+            throw std::runtime_error("Cannot afford this amount as well as "
+                "the estimated fee -- not enough unspent outputs required "
+                    "for this transaction from this mix depth");
+        }
     }
 
     // wallet->retrieve_unspent_and_change_address can change the
@@ -386,13 +436,13 @@ static int initiate_join_payment(Settings& settings)
     // it after that has been finalized
     settings.order_manager =
         std::make_shared<joinparty::OrderManager>(
-            settings.amount, settings.blacklist);
+            settings.amount, settings.blacklist, settings.preferred);
 
-    logger.info("Using nick name:", settings.nick);
+    logger.info("Using nick name:", settings.nick_info.nick);
 
     settings.irc_client = std::make_shared<joinparty::IrcClient>(
-        settings.io_service, irc_host, irc_port, settings.nick, irc_channel,
-            settings.order_manager);
+        settings.io_service, irc_host, irc_port, settings.nick_info.nick,
+            irc_channel, settings.order_manager);
 
     // initiate a timer to process received orders after 10 seconds
     boost::asio::deadline_timer timer{
@@ -401,6 +451,7 @@ static int initiate_join_payment(Settings& settings)
     timer.async_wait(boost::bind(process_join_orders, boost::ref(settings),
         boost::asio::placeholders::error));
 
+    logger.info("Waiting for orders from makers ...");
     settings.io_service.run();
 
     return 0;
@@ -424,6 +475,29 @@ int main(int argc, char** argv)
         settings.servers = (args.count("server") ?
             std::vector<std::string>({args["server"].as<std::string>()}) :
                 libbitcoin_server_addresses);
+
+        auto bounds_check = [](const uint32_t value, const uint32_t lower,
+            const uint32_t upper, std::string name)
+        {
+            if (value < lower || value > upper)
+            {
+                std::stringstream error_msg;
+                error_msg << "Invalid " << name << " (";
+                error_msg << value << " is outside the acceptable range from ";
+                error_msg << lower << "-" << upper << ")";
+
+                throw std::runtime_error(error_msg.str());
+            }
+        };
+
+        settings.commitment_index = (args.count("commitmentindex") ?
+            args["commitmentindex"].as<int32_t>() : 0);
+        bounds_check(settings.commitment_index, 0,
+            std::numeric_limits<uint8_t>::max(), "commitment index");
+        settings.retry_index = (args.count("retryindex") ?
+            args["retryindex"].as<int32_t>() : 0);
+        bounds_check(settings.retry_index, 0,
+            std::numeric_limits<uint8_t>::max(), "retry index");
 
         std::random_shuffle(settings.servers.begin(), settings.servers.end(),
             joinparty::utils::get_random_number);
@@ -516,10 +590,10 @@ int main(int argc, char** argv)
         {
             std::stringstream log_filename;
             boost::filesystem::create_directories("logs");
-            settings.nick = joinparty::utils::generate_random_nickname();
+            generate_nick_key_pair(settings.nick_info);
 
             const auto log_level = (settings.verbose ? "verbose" : "normal");
-            log_filename << "logs/" << settings.nick << ".log";
+            log_filename << "logs/" << settings.nick_info.nick << ".log";
             std::cout << "Logging " << log_level << " to "
                 << log_filename.str() << std::endl;
 
@@ -532,7 +606,7 @@ int main(int argc, char** argv)
             if (args.count("blacklist"))
             {
                 const auto blacklist = args["blacklist"].as<std::string>();
-                boost::split(settings.blacklist, blacklist, boost::is_any_of(","));
+                boost::split(settings.blacklist, blacklist, boost::is_any_of(", "));
 
                 std::vector<std::string> alias_blacklist;
                 alias_blacklist.reserve(settings.blacklist.size());
@@ -545,6 +619,18 @@ int main(int argc, char** argv)
                 }
                 settings.blacklist.insert(settings.blacklist.end(),
                     alias_blacklist.begin(), alias_blacklist.end());
+            }
+
+            if (args.count("preferred"))
+            {
+                const auto preferred = args["preferred"].as<std::string>();
+                boost::split(settings.preferred, preferred, boost::is_any_of(", "));
+            }
+
+            if (args.count("exclude"))
+            {
+                const auto excluded = args["exclude"].as<std::string>();
+                boost::split(settings.excluded, excluded, boost::is_any_of(", "));
             }
 
             settings.num_joins = args["numcoinjoins"].as<uint32_t>();

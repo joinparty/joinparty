@@ -92,8 +92,8 @@ CONFIG_CLEAN_FILES =
 CONFIG_CLEAN_VPATH_FILES =
 am__installdirs = "$(DESTDIR)$(bindir)"
 PROGRAMS = $(bin_PROGRAMS)
-am_joinparty_OBJECTS = encryption.$(OBJEXT) utils.$(OBJEXT) \
-	wallet_utils.$(OBJEXT) wallet.$(OBJEXT) \
+am_joinparty_OBJECTS = nums.$(OBJEXT) encryption.$(OBJEXT) \
+	utils.$(OBJEXT) wallet_utils.$(OBJEXT) wallet.$(OBJEXT) \
 	order_manager.$(OBJEXT) block_cypher_client.$(OBJEXT) \
 	irc_client.$(OBJEXT) joinparty.$(OBJEXT)
 joinparty_OBJECTS = $(am_joinparty_OBJECTS)
@@ -268,7 +268,8 @@ target_alias = @target_alias@
 top_build_prefix = @top_build_prefix@
 top_builddir = @top_builddir@
 top_srcdir = @top_srcdir@
-joinparty_SOURCES = encryption.cpp \
+joinparty_SOURCES = nums.cpp \
+                   encryption.cpp \
                    utils.cpp \
                    wallet_utils.cpp \
                    wallet.cpp \
@@ -375,6 +376,7 @@ distclean-compile:
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/encryption.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/irc_client.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/joinparty.Po@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/nums.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/order_manager.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/utils.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/wallet.Po@am__quote@

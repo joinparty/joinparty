@@ -50,9 +50,8 @@ class IrcClient
         const OrderManagerPtr order_manager);
 
     // ***************** Begin Taker Callbacks ******************
-    void fill_order(const joinparty::OrderState& order_state,
-        const joinparty::encryption::EncPublicKey taker_pub_key,
-        uint32_t cj_amount);
+    void fill_order(
+        joinparty::OrderState& order_state, uint32_t cj_amount);
 
     void send_unsigned_transaction(joinparty::OrderStateList& order_states,
         libbitcoin::chain::transaction tx);
@@ -113,6 +112,8 @@ class IrcClient
     bool handle_end_of_names_list(const std::string& line, const chunk_list& chunks);
 
     bool handle_topic(const std::string& line, const chunk_list& chunks);
+
+    bool handle_network(const std::string& line, const chunk_list& chunks);
     // *************** End IRC Command Handlers ***************
 
     bool handle_orderbook_entries(
@@ -143,6 +144,7 @@ class IrcClient
     bool read_pending_;
     std::string nick_;
     std::string channel_;
+    std::string network_;
     std::string persisted_line_;
     tcp::resolver resolver_;
     boost::asio::ssl::context ctx_;
@@ -153,7 +155,7 @@ class IrcClient
     OrderManagerPtr order_manager_;
     std::vector<std::shared_ptr<boost::asio::deadline_timer>> delay_timers_;
 };
- 
+
 }; // namespace joinparty
 
 #endif // __IRCCLIENT_HPP
