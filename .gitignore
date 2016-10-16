@@ -1,0 +1,17 @@
+
+Makefile
+autom4te.cache
+config.h
+config.log
+config.status
+core
+include/joinparty/sysconfdir.hpp
+joinparty
+logs
+src/.deps
+src/Makefile
+stamp-h1
+wallets
+wallets/*.json
+*.json
+src/*.o

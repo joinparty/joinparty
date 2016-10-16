@@ -70,13 +70,61 @@ namespace joinparty
     {
         const auto blacklist_iter =
             std::find(blacklist_.begin(), blacklist_.end(), order.nick);
+        const auto is_blacklisted = (blacklist_iter != blacklist_.end());
+
+        const auto preferred_iter =
+            std::find(preferred_.begin(), preferred_.end(), order.nick);
+        const auto is_preferred = (preferred_iter != preferred_.end());
 
         if ((amount_ >= order.min_size) && (amount_ <= order.max_size) &&
-            (order.tx_fee > 0) && (blacklist_iter == blacklist_.end()))
+            (order.tx_fee > 0) && !is_blacklisted)
         {
-            eligible_orders_.push_back(order);
-            std::sort(eligible_orders_.begin(), eligible_orders_.end(),
-                boost::bind(&OrderManager::fee_sorter, this, _1, _2));
+            bool order_removed = false;
+            if (!is_preferred)
+            {
+                // if the nickname isn't a whitelisted/preferred
+                // maker, check to make sure that the exact order
+                // details don't match another (likely order
+                // spoofing/duplication, but not necessarily), and if
+                // they do, discard all matches
+                auto cur_order_iter = eligible_orders_.begin();
+                while(cur_order_iter != eligible_orders_.end())
+                {
+                    auto& cur_order = *cur_order_iter;
+                    if (((order.min_size == cur_order.min_size) ||
+                         (order.max_size == cur_order.max_size)) &&
+                        (order.tx_fee == cur_order.tx_fee) &&
+                        (order.cj_fee == cur_order.cj_fee))
+                    {
+                        logger.info(
+                            "Removing potential spoofed/duplicate order from",
+                                cur_order.nick);
+
+                        eligible_orders_.erase(cur_order_iter);
+                        order_removed = true;
+                        break;
+                    }
+                    cur_order_iter++;
+                }
+            }
+            else
+            {
+                logger.info("Adding eligible order from preferred maker",
+                    order.nick);
+            }
+
+            if (!order_removed && order.max_size != 749206132)
+            {
+                eligible_orders_.push_back(order);
+                std::sort(eligible_orders_.begin(), eligible_orders_.end(),
+                    boost::bind(&OrderManager::fee_sorter, this, _1, _2));
+            }
+            else
+            {
+                logger.debug(
+                    "Not considering potential spoofed/duplicate order from",
+                        order.nick);
+            }
         }
     }
 
@@ -114,10 +162,10 @@ namespace joinparty
         const std::string& nick, const OrderType& order_type,
         const OrderID& order_id, const OrderSize& min_size,
         const OrderSize& max_size, const OrderFee& tx_fee,
-        const OrderFee& cj_fee)
+        const OrderFee& cj_fee, const libbitcoin::wallet::ec_public& pub_key)
     {
-        const Order order(nick, order_type, order_id, min_size,
-                          max_size, tx_fee, cj_fee);
+        const Order order(nick, order_type, order_id,
+            min_size, max_size, tx_fee, cj_fee, pub_key);
 
         add_order(order);
     }
@@ -172,6 +220,20 @@ namespace joinparty
     {
         
         return order_states_;
+    }
+
+    OrderState& OrderManager::get_order_state(const std::string& nick)
+    {
+        for(auto& order_state : order_states_)
+        {
+            if (order_state.order.nick == nick)
+            {
+                return order_state;
+            }
+        }
+
+        throw std::runtime_error(
+            "OrderManager does not contain an order state for " + nick);
     }
 
     void OrderManager::clear_order_states()

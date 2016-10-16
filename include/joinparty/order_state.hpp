@@ -36,24 +36,34 @@ namespace joinparty {
 struct OrderState
 {
     explicit OrderState(Order o, joinparty::Wallet::UnspentList& unspent,
-        joinparty::encryption::EncKeyPair& key_pair) :
-    order(o), unspent_list(unspent), taker_key_pair(key_pair),
-        maker_pub_key({}), ioauth_verified(false),
-        signature_verified(false), request(new boost::asio::streambuf),
+        const joinparty::encryption::EncKeyPair& key_pair,
+        const joinparty::encryption::NickInfo& ni, uint32_t ci, uint32_t ri) :
+    order(o), nick_info(ni), taker_key_pair(key_pair), unspent_list(unspent),
+        commitment_index(ci), nums_index(ri), maker_pub_key({}),
+        ioauth_verified(false), signature_verified(false),
+        request(new boost::asio::streambuf),
         response(new boost::asio::streambuf) {}
 
     Order order;
-    // the following 2 fields are copies, and they're common across
+
+    // the following 5 fields are copies, and they're common across
     // all order_state objects for a particular coin join
-    joinparty::Wallet::UnspentList unspent_list;
+    joinparty::encryption::NickInfo nick_info;
     joinparty::encryption::EncKeyPair taker_key_pair;
+    joinparty::Wallet::UnspentList unspent_list;
+    uint32_t commitment_index;
+    uint8_t nums_index; // used as a retry index
 
     joinparty::encryption::EncPublicKey maker_pub_key;
     joinparty::encryption::EncSharedKey shared_key;
 
+    // fields populated in fill order command
+    joinparty::encryption::CommitmentList commitments;
+
     // fields populated from ioauth command
     libbitcoin::chain::output_point::list maker_utxo_list;
     libbitcoin::wallet::ec_public coin_join_pub_key;
+    libbitcoin::wallet::payment_address maker_coin_join_address;
     libbitcoin::wallet::payment_address maker_change_address;
     bool ioauth_verified;
 

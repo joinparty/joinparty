@@ -202,6 +202,20 @@ std::string generate_random_nickname(const size_t length)
     return nick;
 }
 
+void generate_random_data(uint8_t* data, const size_t data_len)
+{
+    const auto rand_seed =
+        std::chrono::system_clock::now().time_since_epoch().count();
+    boost::random::mt19937 generator(rand_seed);
+
+    const auto data_end = data + data_len;
+    for(auto ptr = data; ptr != data_end; ptr++)
+    {
+        *ptr = ((generator() + generator()) %
+            std::numeric_limits<uint8_t>::max());
+    }
+}
+
 }; // namespace utils
 
 }; // namespace joinparty

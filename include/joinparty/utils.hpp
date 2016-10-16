@@ -78,6 +78,8 @@ uint32_t get_random_number(uint32_t max);
 
 std::string generate_random_nickname(const size_t length = 9);
 
+void generate_random_data(uint8_t* data, const size_t data_len);
+
 template<class T>
 data_chunk get_checksum(T& data)
 {

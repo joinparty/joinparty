@@ -46,7 +46,7 @@ struct AddressInfo
 
         bool is_spent() const
         {
-            return (spend.hash != null_hash);
+            return (spend.hash() != null_hash);
         }
 
         bool confirmed(size_t height) const
@@ -79,7 +79,7 @@ struct AddressInfo
         {
             ret = true;
             has_unspent = (transfer.spend.is_valid() &&
-                           (transfer.spend.index == unspent_index) &&
+                           (transfer.spend.index() == unspent_index) &&
                            (transfer.spend_height == unspent_height));
             if (has_unspent)
             {

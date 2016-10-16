@@ -1,6 +1,7 @@
 bin_PROGRAMS=joinparty
 
-joinparty_SOURCES= encryption.cpp \
+joinparty_SOURCES= nums.cpp \
+                   encryption.cpp \
                    utils.cpp \
                    wallet_utils.cpp \
                    wallet.cpp \

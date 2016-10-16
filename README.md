@@ -196,10 +196,10 @@ Joinparty is built on top of libbitcoin (more information at
 libbitcoin.org).  It interacts with a libbitcoin server chosen
 randomly from a list of the following known public servers:
 
+```
 tcp://libbitcoin1.openbazaar.org:9091
 tcp://libbitcoin2.openbazaar.org:9091
-tcp://libbitcoin3.openbazaar.org:9091
-tcp://obelisk.airbitz.co:9091
+```
 
 If you know of others or run an open one yourself, please suggest them
 so that they can be added.
@@ -212,7 +212,8 @@ use, there is a --server option that can be used as follows:
 joinparty/bin/joinparty -w wallet.json --server tcp://some-server:9091 <options>
 ```
 
-If you are running a libbitcoin server locally, you could use:
+If you are running a libbitcoin server locally (highly recommended for
+privacy), you could use:
 
 ```
 joinparty/bin/joinparty -w wallet.json --server tcp://localhost:9091 <options>
@@ -231,10 +232,15 @@ Joinparty implements a BIP32 HD Wallet and mimics the wallet used in
 Joinmarket.  For this project at the moment, all mix depths other than
 mix depth 0 are overkill and not needed (and by default are not
 displayed; but you can add as many as you'd like by editing your
-wallet.json file).  Perhaps makers will be supported in the future, in
-which case additional mix depths will be used.  For now, the idea was
-to make the wallet compatible with joinmarket so that users that were
+wallet.json file*).  Perhaps makers will be supported in the future,
+in which case additional mix depths will be used.  For now, the idea
+was to make the wallet similar to joinmarket so that users that were
 already familiar with joinmarket would feel more or less at home.
+
+* Specifically, edit the "index_cache":"0,0" section to have
+  "index_cache":"0,0|0,0" for each additional mix depth you'd like.
+  Note that comma separated pair of numbers separated by the '|'
+  character.
 
 As a review, or for those that are new, the external addresses are
 where you should send bitcoin into the wallet.  The internal addresses
@@ -343,6 +349,39 @@ joinparty/bin/joinparty -w wallet.json -j -m 0 -n 5 -d BITCOIN-ADDRESS -a 100000
 All of the spending and fee related options above also work with coin
 joins.
 
+Related to v2 protocol support, several optional parameters were
+added.
+
+First is --retryindex, or -R.  Currently, each utxo can be used up to
+3 times before it's blacklisted (as configured by default on the maker
+side).  So for each utxo, 3 different commitments can be computed and
+used. For example if a join intends to use 1 utxo as the input for a
+transaction, you can specify -R 1 to use the second retry for
+commitment 0 (the default).  The default retry index is 0, which
+specifies the first form of the commitment.  Note however that if utxo
+0 has been blacklisted all 3 times using -R, it cannot be used in the
+transaction at all.  For the more advanced, -R specifies which NUMS
+index to use.  Example usage: -R 1
+
+For finer grained utxo control, the --commitmentindex, or -C can be
+used to specify which utxo's commitment to use for a join when there
+are multiples going into the transaction.  For example if a join
+intends to use 3 utxo's as inputs in a transaction, you can specify -C
+1 to use the second one (-C 0 is the first).  This is generally not
+needed unless you know what you're doing.  Example usage: -C 1
+
+For whitelisting preferred makers, the --preferred, or -P option can
+be used to specify maker nick names in a comma separated list.  If
+they have orders available in the range that we're looking for, they
+will be selected before other makers.
+
+Finally, --exclude, or -E was added to allow bitcoin addresses in a
+particular mix depth to be specified so that no utxos associated with
+that address will be used.  This is also for fine grained control
+where a particular utxo has been blacklisted, but you still want to
+sweep the mix depth, or enable transactions with other coins in that
+mix depth.  Example usage: -E "address1,address2,address3"
+
 
 ****************************
   Troubleshooting
@@ -370,10 +409,8 @@ channel which are not sending properly formed messages.  In this case,
 attempting a join another time may not help as that maker's order is
 likely to appear in the next attempt.  In this case, try to black list
 the maker by nickname and then retry the coin join.  To blacklist one
-or more makers, use the -B or --blacklist option.  The syntax for this
-is:
-
--B "user1,user2,user3", or --blacklist "user1,user2,user3"
+or more makers, use the -B or --blacklist option.  Example usage: -B
+"user1,user2,user3" or --blacklist "user1,user2,user3"
 
 Note that blacklisting is not permanent.  It simply ignores their
 orders for the coin join that you're currently running.

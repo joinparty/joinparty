@@ -40,8 +40,9 @@ class OrderManager
 {
   public:
     explicit OrderManager(
-        uint64_t amount, const std::vector<std::string>& blacklist) :
-            amount_(amount), blacklist_(blacklist)
+        uint64_t amount, const std::vector<std::string>& blacklist,
+        const std::vector<std::string>& preferred) :
+    amount_(amount), blacklist_(blacklist), preferred_(preferred)
     {
         order_states_.clear();
         eligible_orders_.clear();
@@ -54,7 +55,7 @@ class OrderManager
     void add_order(const std::string& nick, const OrderType& order_type,
         const OrderID& order_id, const OrderSize& min_size,
         const OrderSize& max_size, const OrderFee& tx_fee,
-        const OrderFee& cj_fee);
+        const OrderFee& cj_fee, const libbitcoin::wallet::ec_public& pub_key);
 
     void cancel_order(const std::string& nick, const OrderID& order_id);
 
@@ -65,6 +66,8 @@ class OrderManager
     void add_order_state(const OrderState& order_state);
 
     OrderStateList& get_order_states();
+
+    OrderState& get_order_state(const std::string& nick);
 
     void clear_order_states();
 
@@ -112,6 +115,7 @@ class OrderManager
     BroadcastTxCallback tx_broadcaster_;
     std::shared_ptr<Wallet> wallet_;
     const std::vector<std::string>& blacklist_;
+    const std::vector<std::string>& preferred_;
     libbitcoin::chain::transaction* order_transaction_;
 };
 

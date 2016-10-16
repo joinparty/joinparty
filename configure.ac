@@ -1,6 +1,6 @@
 dnl Process this file with autoconf to produce a configure script.
 
-AC_INIT(src/joinparty.cpp, 0.0.1)
+AC_INIT(src/joinparty.cpp, 0.0.2)
 dnl Every other copy of the package version number gets its value from here
 AM_INIT_AUTOMAKE
 

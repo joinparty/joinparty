@@ -100,11 +100,13 @@ class Wallet
     // mix_depth.  passes back that list, the next available
     // change_address, and the change_amount (if any).  if the
     // specified amount is 0, all utxos will be used and the amount
-    // will be set to the total amount of those unspent outputs.
+    // will be set to the total amount of those unspent outputs.  if
+    // an address list (excluded) is specifed, no utxos associated
+    // with that address will be returned.
     bool retrieve_unspent_and_change_address(UnspentList& selected_unspent,
         libbitcoin::wallet::payment_address& change_address,
         uint64_t& change_amount, const uint32_t mix_depth,
-        uint64_t& amount);
+        uint64_t& amount, std::vector<std::string>* excluded = nullptr);
 
     // sends a payment from the utxos in the specified mix_depth
     //
@@ -119,7 +121,8 @@ class Wallet
     // available change address for use
     libbitcoin::chain::output_info::list get_unspent_outputs_for_mix_depth(
         const uint32_t mix_depth, UnspentList& unspent_list,     
-        libbitcoin::wallet::payment_address& change_address);
+        libbitcoin::wallet::payment_address& change_address,
+        std::vector<std::string>* excluded = nullptr);
 
     // constructs a coin join transaction in preparation for filling
     // various maker orders.  change_amount and change_address specify
@@ -172,6 +175,8 @@ class Wallet
     // builds IndexList object from entries in wallet_map["index_cache"]
     void build_index_list_from_index_cache();
 
+    size_t get_current_block_height();
+
   private:
     void get_wallet_seed(long_hash& seed);
 
@@ -183,8 +188,6 @@ class Wallet
         libbitcoin::ec_compressed& point, const std::string& address,
         uint32_t mix_depth, uint32_t for_change, uint32_t index,
         AddressInfo& address_info);
-
-    size_t get_current_block_height();
 
     KeyPairList keys_;
     bool initialized_;

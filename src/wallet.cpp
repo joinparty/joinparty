@@ -112,8 +112,11 @@ namespace joinparty
         std::stringstream error_msg;
 
         libbitcoin::chain::transaction tx;
-        tx.locktime = locktime;
-        tx.version = transaction_version;
+        tx.set_locktime(locktime);
+        tx.set_version(transaction_version);
+
+        libbitcoin::chain::input::list inputs;
+        libbitcoin::chain::output::list outputs;
 
         // add the destination output and change outputs (if any)
         chain::operation::stack amount_payment_ops =
@@ -122,7 +125,8 @@ namespace joinparty
 
         const libbitcoin::chain::output output{
             amount, chain::script{amount_payment_ops}};
-        tx.outputs.push_back(output);
+
+        outputs.push_back(output);
 
         // add our raw change amount
         if (change_amount)
@@ -137,7 +141,7 @@ namespace joinparty
             const libbitcoin::chain::output change_output{
                 change_amount, chain::script{change_payment_ops}};
 
-            tx.outputs.push_back(change_output);
+            outputs.push_back(change_output);
         }
 
         // add all inputs to the tx
@@ -151,11 +155,15 @@ namespace joinparty
             }
 
             libbitcoin::chain::input input;
-            input.sequence = max_input_sequence;
-            input.previous_output = libbitcoin::chain::output_point{
-                transfer.output.hash, transfer.output.index};
-            tx.inputs.push_back(input);
+            input.set_sequence(max_input_sequence);
+            input.set_previous_output(
+                {transfer.output.hash(), transfer.output.index()});
+
+            inputs.push_back(input);
         }
+
+        tx.set_inputs(inputs);
+        tx.set_outputs(outputs);
 
         // sign all inputs to the tx
         sign_transaction_inputs(unspent, tx);
@@ -183,7 +191,7 @@ namespace joinparty
             logger.info("Using adjusted change amount of",
                 adjusted_amount, "back to our self");
 
-            tx.outputs[1] = change_output;
+            tx.outputs()[1] = change_output;
 
             fee_handled = true;
         }
@@ -203,7 +211,7 @@ namespace joinparty
                 amount, chain::script{amount_payment_ops}};
 
             // adjust the amount that was previously already set
-            tx.outputs[0] = output;
+            tx.outputs()[0] = output;
 
             fee_handled = true;
         }
@@ -225,12 +233,13 @@ namespace joinparty
     bool Wallet::retrieve_unspent_and_change_address(
         UnspentList& selected_unspent,
         libbitcoin::wallet::payment_address& change_address,
-        uint64_t& change_amount, const uint32_t mix_depth, uint64_t& amount)
+        uint64_t& change_amount, const uint32_t mix_depth, uint64_t& amount,
+        std::vector<std::string>* excluded)
     {
         // retrieve all unspent for this mix depth
         UnspentList unspent_list;
         auto unspent = get_unspent_outputs_for_mix_depth(
-            mix_depth, unspent_list, change_address);
+            mix_depth, unspent_list, change_address, excluded);
         JP_ASSERT(unspent.size() == unspent_list.size());
 
         if (amount > 0)
@@ -305,9 +314,9 @@ namespace joinparty
             }
 
             libbitcoin::chain::transaction tmp_tx;
-            get_transaction_info(transfer.output.hash, tmp_tx);
+            get_transaction_info(transfer.output.hash(), tmp_tx);
             const auto& previous_output_script =
-                tmp_tx.outputs[transfer.output.index].script;
+                tmp_tx.outputs()[transfer.output.index()].script();
 
             const auto address = joinparty::utils::bitcoin_address(
                 previous_output_script);
@@ -315,9 +324,9 @@ namespace joinparty
             // set our signed script on the input, but first find the
             // input's index in the tx we're building
             uint32_t input_index = std::numeric_limits<uint32_t>::max();
-            for(uint32_t i = 0; i < output_tx.inputs.size(); i++)
+            for(uint32_t i = 0; i < output_tx.inputs().size(); i++)
             {
-                if (output_tx.inputs[i].previous_output == transfer.output)
+                if (output_tx.inputs()[i].previous_output() == transfer.output)
                 {
                     input_index = i;
                     break;
@@ -360,14 +369,18 @@ namespace joinparty
             }
 
             // set signed script on the input
-            output_tx.inputs[input_index].script = endorsement_script;
+            output_tx.inputs()[input_index].set_script(endorsement_script);
 
             // validate input
-            if (!libbitcoin::chain::script::verify(
-                    endorsement_script, previous_output_script, output_tx,
-                    input_index, 0xFFFFFF))
+            const auto ret = libbitcoin::chain::script::verify(
+                output_tx, input_index, previous_output_script, 0xFFFFFFFF);
+            if (ret != libbitcoin::error::success)
             {
-                throw std::runtime_error("Maker signature is invalid");
+                const std::string error =
+                    ((ret == libbitcoin::error::validate_inputs_failed) ?
+                        "validate inputs failed" : "operation failed");
+                throw std::runtime_error(
+                    "Maker signature is invalid: " + error);
             }
         }
     }
@@ -382,33 +395,35 @@ namespace joinparty
         const uint64_t estimated_fee, const bool subtract_fee)
     {
         JP_ASSERT(initialized_);
-        out_tx.locktime = locktime;
-        out_tx.version = transaction_version;
+        out_tx.set_locktime(locktime);
+        out_tx.set_version(transaction_version);
+
+        libbitcoin::chain::input::list inputs;
+        libbitcoin::chain::output::list outputs;
 
         uint64_t coinjoin_fee_total = 0;
         uint64_t maker_txfee_total = 0;
         for(const auto& order_state : order_states)
         {
-            // add the maker's destination output
+            // add the maker's specified destination output
             const chain::operation::stack payment_ops =
                 chain::operation::to_pay_key_hash_pattern(
-                    libbitcoin::wallet::payment_address(
-                        order_state.coin_join_pub_key).hash());
+                    order_state.maker_coin_join_address.hash());
 
             const libbitcoin::chain::output output{
                 amount, chain::script{payment_ops}};
 
-            out_tx.outputs.push_back(output);
+            outputs.push_back(output);
 
             // add all maker inputs to the tx
             for(const auto& maker_utxo : order_state.maker_utxo_list)
             {
                 libbitcoin::chain::input input;
-                input.sequence = max_input_sequence;
-                input.previous_output = libbitcoin::chain::output_point{
-                    maker_utxo.hash, maker_utxo.index};
+                input.set_sequence(max_input_sequence);
+                input.set_previous_output(
+                    {maker_utxo.hash(), maker_utxo.index()});
 
-                out_tx.inputs.push_back(input);
+                inputs.push_back(input);
             }
 
             // a method to calculate coinjoin fee based on the maker order type
@@ -425,15 +440,15 @@ namespace joinparty
             for(const auto& utxo : order_state.maker_utxo_list)
             {
                 libbitcoin::chain::transaction resolved_tx;
-                if (!get_transaction_info(utxo.hash, resolved_tx) ||
+                if (!get_transaction_info(utxo.hash(), resolved_tx) ||
                     (!resolved_tx.is_valid()))
                 {
                     logger.info(
                         "Failed to get transaction info for tx hash: ",
-                            libbitcoin::encode_base16(utxo.hash));
+                            libbitcoin::encode_base16(utxo.hash()));
                     return false;
                 }
-                total_input += resolved_tx.outputs[utxo.index].value;
+                total_input += resolved_tx.outputs()[utxo.index()].value();
             }
 
             const uint64_t maker_change_amount = total_input - amount -
@@ -460,7 +475,7 @@ namespace joinparty
                 maker_change_amount, chain::script{
                     maker_change_payment_ops}};
 
-            out_tx.outputs.push_back(maker_change_output);
+            outputs.push_back(maker_change_output);
 
             coinjoin_fee_total += real_coinjoin_fee;
             maker_txfee_total += order_state.order.tx_fee;
@@ -479,12 +494,15 @@ namespace joinparty
             }
 
             libbitcoin::chain::input input;
-            input.sequence = max_input_sequence;
-            input.previous_output = libbitcoin::chain::output_point{
-                transfer.output.hash, transfer.output.index};
+            input.set_sequence(max_input_sequence);
+            input.set_previous_output(
+                {transfer.output.hash(), transfer.output.index()});
 
-            out_tx.inputs.push_back(input);
+            inputs.push_back(input);
         }
+
+        out_tx.set_inputs(inputs);
+        out_tx.set_outputs(outputs);
 
         const auto tx_size = static_cast<float>(out_tx.serialized_size());
         logger.info("Using specified fee estimate of", estimated_fee,
@@ -505,18 +523,18 @@ namespace joinparty
             if (!fee_handled && (change_amount > estimated_fee))
             {
                 adjusted_amount -= estimated_fee;
+
+                const libbitcoin::chain::output change_output{
+                  adjusted_amount, chain::script{change_payment_ops}};
+
+                logger.info("Using actual change amount of",
+                            adjusted_amount, "back to our self");
+                logger.info("***** SELF amount=", amount,
+                            "change=", adjusted_amount);
+
+                out_tx.outputs().push_back(change_output);
+                fee_handled = true;
             }
-            const libbitcoin::chain::output change_output{
-                adjusted_amount, chain::script{change_payment_ops}};
-
-            logger.info("Using actual change amount of",
-                adjusted_amount, "back to our self");
-            logger.info("***** SELF amount=", amount,
-                "change=", adjusted_amount);
-
-            out_tx.outputs.push_back(change_output);
-
-            fee_handled = true;
         }
 
         if (!fee_handled)
@@ -533,15 +551,13 @@ namespace joinparty
             chain::operation::to_pay_key_hash_pattern(
                 destination_address.hash());
 
-        const libbitcoin::chain::output output{
-            amount, chain::script{payment_ops}};
-
-        out_tx.outputs.push_back(output);
+        out_tx.outputs().push_back(
+            {amount, chain::script{payment_ops}});
 
         // randomize all inputs and outputs
-        std::random_shuffle(out_tx.inputs.begin(), out_tx.inputs.end(),
+        std::random_shuffle(out_tx.inputs().begin(), out_tx.inputs().end(),
             joinparty::utils::get_random_number);
-        std::random_shuffle(out_tx.outputs.begin(), out_tx.outputs.end(),
+        std::random_shuffle(out_tx.outputs().begin(), out_tx.outputs().end(),
             joinparty::utils::get_random_number);
 
         return true;
@@ -576,7 +592,8 @@ namespace joinparty
 
     libbitcoin::chain::output_info::list Wallet::get_unspent_outputs_for_mix_depth(
         const uint32_t mix_depth, UnspentList& unspent_list,
-        libbitcoin::wallet::payment_address& change_address)
+        libbitcoin::wallet::payment_address& change_address,
+        std::vector<std::string>* excluded)
     {
         auto assigned_change_address = false;
         libbitcoin::chain::output_info::list unspent{};
@@ -595,6 +612,29 @@ namespace joinparty
                 libbitcoin::ec_compressed point;
                 libbitcoin::secret_to_public(point, key);
                 const auto address = joinparty::utils::bitcoin_address(point);
+
+                // if this address has been excluded by user input, do
+                // not consider it for return here
+                if (excluded)
+                {
+                    bool addr_excluded = false;
+                    for(const auto& addr : *excluded)
+                    {
+                        if (addr == address)
+                        {
+                            addr_excluded = true;
+                            break;
+                        }
+                    }
+
+                    if (addr_excluded)
+                    {
+                        logger.info("Skipping utxos for address", address,
+                            "in mix depth", mix_depth,
+                                "due to user specified exclusion");
+                        continue;
+                    }
+                }
 
                 AddressInfo address_info;
                 if (!fetch_address_info(
@@ -623,13 +663,14 @@ namespace joinparty
                     }
                 }
 
+                bool is_duplicate = false;
                 for(const auto& transfer : address_info.transfers)
                 {
                     if (transfer.confirmed(cur_height) && !transfer.is_spent())
                     {
                         logger.info("Adding unspent for mix level",
                             mix_depth, "with hash", libbitcoin::encode_base16(
-                                transfer.output.hash), "and value",
+                                transfer.output.hash()), "and value",
                                     transfer.value);
 
                         unspent.push_back({transfer.output, transfer.value});
@@ -835,7 +876,7 @@ namespace joinparty
             for(const auto& row : rows)
             {
                 if ((row.spend_height == joinparty::unspent_height) &&
-                    (row.spend.index == unspent_index))
+                    (row.spend.index() == unspent_index))
                 {
                     address_info.total_value += row.value;
                 }
@@ -879,13 +920,13 @@ namespace joinparty
             {
                 balance.total_received += row.value;
 
-                if (row.spend.hash == null_hash)
+                if (row.spend.hash() == null_hash)
                 {
                     balance.unspent += row.value;
                 }
 
                 if (row.output_height != 0 &&
-                    (row.spend.hash == null_hash || row.spend_height == 0))
+                    (row.spend.hash() == null_hash || row.spend_height == 0))
                 {
                     balance.confirmed += row.value;
                 }
