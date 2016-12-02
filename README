@@ -336,6 +336,24 @@ be used to specify maker nick names in a comma separated list.  If
 they have orders available in the range that we're looking for, they
 will be selected before other makers.
 
+In the Joinmarket v2 protocol, some malicious makers stop responding
+at a certain point in the coin join attempt.  To help combat this,
+some order filtering has been automatically added.  In addition, a new
+argument -M, or --minmakers was introduced that allows you to do a
+join with some minimum number of makers, even if the target is higher.
+An example would be like, "I want to join this amount with 10 makers,
+but if 10 are not responding properly, continue the join if at least 6
+makers are honest makers".  Without this feature, if any one of the 10
+makers stopped responding, the commitment has been burned and cannot
+be re-used, which can cause major usability issues.  This option
+allows a more flexible arrangement and will allow joins to continue in
+most cases despite some malicious makers that do not respond.
+
+A concrete example showing a join with 5 makers, but with a minimum of
+3:
+
+joinparty/bin/joinparty -w wallet.json -j -m 0 -n 5 -M 3 -d BITCOIN-ADDRESS -a 100000
+
 Finally, --exclude, or -E was added to allow bitcoin addresses in a
 particular mix depth to be specified so that no utxos associated with
 that address will be used.  This is also for fine grained control

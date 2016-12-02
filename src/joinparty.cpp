@@ -35,8 +35,12 @@ using namespace boost::program_options;
 
 static const std::vector<std::string> libbitcoin_server_addresses
 {
+    // HELP WANTED: add any known stable/reliable libbitcoin servers
+    // to this list
     "tcp://libbitcoin1.openbazaar.org:9091",
     "tcp://libbitcoin2.openbazaar.org:9091",
+    "tcp://libbitcoin1.thecodefactory.org:9091",
+    "tcp://libbitcoin2.thecodefactory.org:9091",
 // these servers appear to be down
 //    "tcp://libbitcoin3.openbazaar.org:9091",
 //    "tcp://obelisk.airbitz.co:9091",
@@ -60,12 +64,15 @@ struct Settings
     bool verbose;
     bool send_payment;
     bool join_payment;
+    bool constructing_tx;
 
     uint32_t mix_depth;
     uint32_t subtract_fee;
-    uint32_t num_joins;
+    uint32_t target_num_makers;
+    uint32_t min_num_makers;
     uint32_t commitment_index;
     uint32_t retry_index;
+    uint32_t num_maker_responses_remaining;
 
     uint64_t amount;
     uint64_t change_amount;
@@ -82,8 +89,6 @@ struct Settings
 
     boost::asio::io_service io_service;
 
-    size_t num_maker_responses_remaining;
-
     joinparty::encryption::NickInfo nick_info;
 
     libbitcoin::chain::transaction coin_join_tx;
@@ -97,6 +102,8 @@ struct Settings
     std::shared_ptr<joinparty::Wallet> wallet;
     std::shared_ptr<joinparty::IrcClient> irc_client;
     std::shared_ptr<joinparty::OrderManager> order_manager;
+
+    std::unique_ptr<boost::asio::deadline_timer> min_num_maker_timer;
 };
 
 
@@ -131,8 +138,10 @@ static void parse_arguments(int argc, char** argv, variables_map& args)
          "The target fee per kb (0=low, 1=medium, 2=high; default is 1)")
         ("destination,d", value<libbitcoin::wallet::payment_address>(),
          "The bitcoin payment address")
-        ("numcoinjoins,n", value<uint32_t>(),
-         "The number of parties to join with")
+        ("nummakers,n", value<uint32_t>(),
+         "The target number of parties to join with")
+        ("minmakers,M", value<uint32_t>(),
+         "The minimum number of parties to join with")
         ("commitmentindex,C", value<int32_t>(),
          "The index of commitment to use for this coin join; default is 0")
         ("retryindex,R", value<int32_t>(),
@@ -184,10 +193,10 @@ static void parse_arguments(int argc, char** argv, variables_map& args)
     if (args.count("joinpayment"))
     {
         if (!args.count("mixdepth") || !args.count("destination") ||
-            !args.count("amount") || !args.count("numcoinjoins"))
+            !args.count("amount") || !args.count("nummakers"))
         {
             std::cerr << "The joinpayment option requires the mixdepth (-m), "
-                "destination (-d), numcoinjoins (-n), and amount (-a) options."
+                "destination (-d), nummakers (-n), and amount (-a) options."
                     << std::endl;
             std::exit(1);
         }
@@ -214,8 +223,9 @@ static int send_payment(Settings& settings)
     return 0;
 }
 
-// a callback called after we've heard from all of the makers and it's
-// time to broadcast the signed coin join transaction
+// a callback called after we've heard from all (or at least the
+// minimum number) of the makers and it's time to broadcast the signed
+// coin join transaction
 static bool broadcast_transaction(
     Settings& settings, libbitcoin::chain::transaction* tx,
     joinparty::OrderState* order_state)
@@ -271,11 +281,39 @@ static bool construct_transaction(
 {
     logger.debug("*** OrderManager: registered construct tx callback called");
     JP_ASSERT(order_state.ioauth_verified);
-    if (--settings.num_maker_responses_remaining == 0)
-    {
-        settings.num_maker_responses_remaining = settings.num_joins;
 
-        logger.info("Creating coinjoin transaction now ...");
+    settings.num_maker_responses_remaining--;
+
+    const uint32_t num_valid_makers =
+        settings.target_num_makers - settings.num_maker_responses_remaining;
+
+    const auto have_min_makers = (num_valid_makers >= settings.min_num_makers);
+
+    logger.info("min_makers", settings.min_num_makers, "target_num_makers",
+        settings.target_num_makers, "num_valid_makers", num_valid_makers,
+            "have_min_makers", (have_min_makers ? "TRUE" : "FALSE"));
+
+    auto construct_tx = [&settings, &order_state, num_valid_makers](
+        const boost::system::error_code error)
+    {
+        if (error && (error == boost::asio::error::operation_aborted))
+        {
+            logger.info("Construct Tx call via timer was canceled");
+            return;
+        }
+
+        if (settings.constructing_tx)
+        {
+            logger.info("Got a late maker response, but ignoring because "
+                "we're already constructing the transaction");
+            return;
+        }
+
+        settings.constructing_tx = true;
+
+        logger.info("Creating coinjoin transaction now with",
+            num_valid_makers, "makers...");
+        settings.num_maker_responses_remaining = num_valid_makers;
 
         if (!settings.wallet->create_coin_join_transaction(
             settings.coin_join_tx, settings.amount, settings.destination,
@@ -308,6 +346,47 @@ static bool construct_transaction(
                     settings.coin_join_tx);
         };
         settings.io_service.post(send_transaction);
+    };
+
+    // if we have a minimum number of makers for a join, but not all
+    // yet, start a timer that waits up to 30 seconds for a response.
+    // if one is received, cancel the timer and re-issue it if we're
+    // still waiting for more responses.  if another is never received
+    // and the timer expires, we'll construct the transaction with the
+    // makers we have communicated with already
+    if (have_min_makers)
+    {
+        if (settings.min_num_maker_timer)
+        {
+            settings.min_num_maker_timer->cancel();
+            settings.min_num_maker_timer = nullptr;
+        }
+
+        static constexpr size_t additional_wait_secs = 30;
+        logger.info("Already have minimum number of required makers; "
+            "waiting for additional responses");
+        settings.min_num_maker_timer =
+            std::make_unique<boost::asio::deadline_timer>(
+                settings.io_service, boost::posix_time::seconds(
+                    additional_wait_secs));
+
+        settings.min_num_maker_timer->async_wait(construct_tx);
+
+        // drops through to waiting for more makers
+        // FIXME: needs to ignore all future calls to this when construct_tx is called
+    }
+
+    if (settings.num_maker_responses_remaining == 0)
+    {
+        // now that we have all maker responses, cancel the timer and
+        // construct the tx
+        if (settings.min_num_maker_timer)
+        {
+            settings.min_num_maker_timer->cancel();
+            settings.min_num_maker_timer = nullptr;
+        }
+
+        construct_tx(boost::system::error_code{});
         return true;
     }
     else
@@ -330,8 +409,8 @@ static int process_join_orders(
 
     // determine the orders to fill for our join and declare our
     // intention to fill them to the maker
-    settings.num_maker_responses_remaining = settings.num_joins;
-    for(auto i = 0; i < settings.num_joins; i++)
+    settings.num_maker_responses_remaining = settings.target_num_makers;
+    for(auto i = 0; i < settings.target_num_makers; i++)
     {
         const auto& order =
             settings.order_manager->get_next_eligible_order();
@@ -382,8 +461,9 @@ static int initiate_join_payment(Settings& settings)
     // we have to come up with an estimated fee here based on our
     // estimated transaction size.
     const auto estimated_ins =
-        (settings.selected_unspent_list.size() + 3) * settings.num_joins;
-    const auto estimated_outs = 2 * (settings.num_joins + 1);
+        (settings.selected_unspent_list.size() + 3) *
+            settings.target_num_makers;
+    const auto estimated_outs = 2 * (settings.target_num_makers + 1);
 
     const auto estimated_tx_size = 10 + (estimated_ins * 147) +
         (34 * estimated_outs);
@@ -391,7 +471,7 @@ static int initiate_join_payment(Settings& settings)
     settings.estimated_fee = settings.target_fee_per_kb *
         static_cast<float>(
             (static_cast<float>(estimated_tx_size) / 1024) /
-                settings.num_joins);
+                settings.target_num_makers);
 
     logger.info("Target fee per KB is", settings.target_fee_per_kb,
         "and the estimated tx size is", estimated_tx_size);
@@ -475,6 +555,7 @@ int main(int argc, char** argv)
         settings.servers = (args.count("server") ?
             std::vector<std::string>({args["server"].as<std::string>()}) :
                 libbitcoin_server_addresses);
+        settings.constructing_tx = false;
 
         auto bounds_check = [](const uint32_t value, const uint32_t lower,
             const uint32_t upper, std::string name)
@@ -633,7 +714,9 @@ int main(int argc, char** argv)
                 boost::split(settings.excluded, excluded, boost::is_any_of(", "));
             }
 
-            settings.num_joins = args["numcoinjoins"].as<uint32_t>();
+            settings.target_num_makers = args["nummakers"].as<uint32_t>();
+            settings.min_num_makers = (args.count("minmakers") ?
+                args["minmakers"].as<uint32_t>() : settings.target_num_makers);
             settings.change_amount = 0;
             settings.num_maker_responses_remaining = 0;
             joinparty::encryption::generate_key_pair(settings.key_pair);

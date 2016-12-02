@@ -54,7 +54,7 @@ class IrcClient
         joinparty::OrderState& order_state, uint32_t cj_amount);
 
     void send_unsigned_transaction(joinparty::OrderStateList& order_states,
-        libbitcoin::chain::transaction tx);
+        const libbitcoin::chain::transaction& tx);
 
     void issue_read();
 

@@ -44,8 +44,8 @@ class OrderState;
 static constexpr uint32_t locktime = 0;
 static constexpr uint32_t script_version = 5;
 static constexpr uint32_t transaction_version = 1;
-static constexpr auto hash_type =
-    libbitcoin::chain::signature_hash_algorithm::all;
+static constexpr auto sighash_type =
+    libbitcoin::machine::sighash_algorithm::all;
 
 class Wallet
 {

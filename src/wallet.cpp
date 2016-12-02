@@ -119,8 +119,8 @@ namespace joinparty
         libbitcoin::chain::output::list outputs;
 
         // add the destination output and change outputs (if any)
-        chain::operation::stack amount_payment_ops =
-            chain::operation::to_pay_key_hash_pattern(
+        machine::operation::list amount_payment_ops =
+            chain::script::to_pay_key_hash_pattern(
                 destination_address.hash());
 
         const libbitcoin::chain::output output{
@@ -134,8 +134,8 @@ namespace joinparty
             logger.info("Using change amount of",
                 change_amount, "back to our self");
 
-            chain::operation::stack change_payment_ops =
-                chain::operation::to_pay_key_hash_pattern(
+            machine::operation::list change_payment_ops =
+                chain::script::to_pay_key_hash_pattern(
                     change_address.hash());
 
             const libbitcoin::chain::output change_output{
@@ -180,8 +180,8 @@ namespace joinparty
         // if we are expecting change back, pull the fee from there
         if (change_amount && (change_amount > estimated_fee))
         {
-            chain::operation::stack change_payment_ops =
-                chain::operation::to_pay_key_hash_pattern(
+            machine::operation::list change_payment_ops =
+                chain::script::to_pay_key_hash_pattern(
                     change_address.hash());
 
             const uint64_t adjusted_amount = change_amount - estimated_fee;
@@ -345,7 +345,7 @@ namespace joinparty
             endorsement tx_endorse;
             if (!chain::script::create_endorsement(
                     tx_endorse, key, previous_output_script,
-                    output_tx, input_index, hash_type))
+                    output_tx, input_index, sighash_type))
             {
                 throw std::runtime_error("Failed to create tx endorsement");
             }
@@ -354,33 +354,26 @@ namespace joinparty
             const auto pub_key_data =
                 joinparty::utils::public_from_private(key);
 
-            std::string endorsement_script_str = "[ ";
-            endorsement_script_str.append(
-                libbitcoin::encode_base16(tx_endorse));
-            endorsement_script_str.append(" ] [ ");
-            endorsement_script_str.append(
-                libbitcoin::encode_base16(pub_key_data));
-            endorsement_script_str.append(" ]");
+            std::stringstream script_ss;
+            script_ss << "[" << libbitcoin::encode_base16(tx_endorse) << "] [";
+            script_ss << libbitcoin::encode_base16(pub_key_data) << "]";
 
             libbitcoin::chain::script endorsement_script;
-            if (!endorsement_script.from_string(endorsement_script_str))
+            if (!endorsement_script.from_string(script_ss.str()))
             {
-                throw std::runtime_error("failed to create endorsement script");
+                throw std::runtime_error("failed to create endorsement script1");
             }
 
             // set signed script on the input
-            output_tx.inputs()[input_index].set_script(endorsement_script);
+            output_tx.inputs()[input_index].set_script(
+                std::move(endorsement_script));
 
             // validate input
-            const auto ret = libbitcoin::chain::script::verify(
-                output_tx, input_index, previous_output_script, 0xFFFFFFFF);
+            const auto ret = libbitcoin::chain::script::verify(output_tx,
+                input_index, libbitcoin::machine::rule_fork::all_rules);
             if (ret != libbitcoin::error::success)
             {
-                const std::string error =
-                    ((ret == libbitcoin::error::validate_inputs_failed) ?
-                        "validate inputs failed" : "operation failed");
-                throw std::runtime_error(
-                    "Maker signature is invalid: " + error);
+                throw std::runtime_error("Maker signature is invalid");
             }
         }
     }
@@ -405,9 +398,15 @@ namespace joinparty
         uint64_t maker_txfee_total = 0;
         for(const auto& order_state : order_states)
         {
+            // if the maker didn't respond, skip it
+            if (!order_state.ioauth_verified)
+            {
+                continue;
+            }
+
             // add the maker's specified destination output
-            const chain::operation::stack payment_ops =
-                chain::operation::to_pay_key_hash_pattern(
+            const machine::operation::list payment_ops =
+                chain::script::to_pay_key_hash_pattern(
                     order_state.maker_coin_join_address.hash());
 
             const libbitcoin::chain::output output{
@@ -467,8 +466,8 @@ namespace joinparty
                     "sub-dust change");
             }
 
-            const chain::operation::stack maker_change_payment_ops =
-                chain::operation::to_pay_key_hash_pattern(
+            const machine::operation::list maker_change_payment_ops =
+                chain::script::to_pay_key_hash_pattern(
                     order_state.maker_change_address.hash());
 
             const libbitcoin::chain::output maker_change_output{
@@ -515,8 +514,8 @@ namespace joinparty
         // if we are expecting change back, pull the fee from there
         if (change_amount)
         {
-            chain::operation::stack change_payment_ops =
-                chain::operation::to_pay_key_hash_pattern(
+            machine::operation::list change_payment_ops =
+                chain::script::to_pay_key_hash_pattern(
                     change_address.hash());
 
             uint64_t adjusted_amount = change_amount;
@@ -547,8 +546,8 @@ namespace joinparty
         }
 
         // add our destination output for the amount
-        const chain::operation::stack payment_ops =
-            chain::operation::to_pay_key_hash_pattern(
+        const machine::operation::list payment_ops =
+            chain::script::to_pay_key_hash_pattern(
                 destination_address.hash());
 
         out_tx.outputs().push_back(
@@ -1005,8 +1004,9 @@ namespace joinparty
 
         auto on_error = [&transaction](const code& error)
         {
-            logger.info(
-                "Failed to validate transaction: ", error.message());
+            logger.info("Failed to validate transaction: ", error.message());
+            logger.info("Failed raw transaction:",
+                libbitcoin::encode_base16(transaction.to_data()));
             logger.info(
                 "Failed transaction:", transaction.to_string(0xFFFFFF));
         };

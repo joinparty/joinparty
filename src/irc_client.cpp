@@ -305,12 +305,19 @@ namespace joinparty {
 
     void IrcClient::send_unsigned_transaction(
         joinparty::OrderStateList& order_states,
-        libbitcoin::chain::transaction tx)
+        const libbitcoin::chain::transaction& tx)
     {
         const auto num_order_states = order_states.size();
         for(auto i = 0; i < num_order_states; i++)
         {
             const auto& order_state = order_states[i];
+
+            // if the maker didn't respond in an earlier step, skip it
+            if (!order_state.ioauth_verified)
+            {
+                continue;
+            }
+
             const auto encrypted_message =
                 joinparty::encryption::encrypt_message(
                     libbitcoin::encode_base64(tx.to_data()),
@@ -829,6 +836,14 @@ namespace joinparty {
 
         auto& order_state = order_manager_->get_order_state(from);
 
+        // sanity check, shouldn't happen
+        if (!order_state.ioauth_verified)
+        {
+            logger.info("[sig] Ignoring signature",
+                signature, "from", from,"-- ioauth not verified");
+            return true;
+        }
+
         // verify the signature from the maker 
         // !sig <signature> (NS)
         const auto b64_sig = joinparty::encryption::decrypt_message(
@@ -840,8 +855,7 @@ namespace joinparty {
         libbitcoin::decode_base64(raw_data, b64_sig);
 
         libbitcoin::chain::script script_signature;
-        script_signature.from_data(
-            raw_data, false, libbitcoin::chain::script::parse_mode::strict);
+        script_signature.from_data(raw_data, false);
 
         const auto wallet = order_manager_->get_wallet();
         if (wallet == nullptr)
@@ -880,14 +894,10 @@ namespace joinparty {
 
             // validate input
             const auto ret = libbitcoin::chain::script::verify(
-                tx, input_index, previous_output_script, 0xFFFFFFFF);
+                tx, input_index, libbitcoin::machine::rule_fork::all_rules);
             if (ret != libbitcoin::error::success)
             {
-                const std::string error =
-                    ((ret == libbitcoin::error::validate_inputs_failed) ?
-                        "validate inputs failed" : "operation failed");
-                throw std::runtime_error(
-                    "Maker signature is invalid: " + error);
+                throw std::runtime_error("Maker signature is invalid");
             }
         }
 
