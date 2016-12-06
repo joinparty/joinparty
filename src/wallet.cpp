@@ -361,7 +361,7 @@ namespace joinparty
             libbitcoin::chain::script endorsement_script;
             if (!endorsement_script.from_string(script_ss.str()))
             {
-                throw std::runtime_error("failed to create endorsement script1");
+                throw std::runtime_error("failed to create endorsement script");
             }
 
             // set signed script on the input
@@ -1007,8 +1007,8 @@ namespace joinparty
             logger.info("Failed to validate transaction: ", error.message());
             logger.info("Failed raw transaction:",
                 libbitcoin::encode_base16(transaction.to_data()));
-            logger.info(
-                "Failed transaction:", transaction.to_string(0xFFFFFF));
+            logger.info("Failed transaction:",
+                joinparty::utils::to_string(transaction));
         };
 
         client_.transaction_pool_validate(on_error, on_done, transaction);

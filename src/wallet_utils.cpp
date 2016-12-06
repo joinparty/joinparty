@@ -35,15 +35,12 @@ namespace wallet_utils
         static char buf[max_creation_time_length] = {0};
         strftime(buf, max_creation_time_length,
                  "%Y/%m/%d %H:%M:%S", time_info);
-        std::string creation_time(buf);
 
         wallet_map["checksum"] = {};
         wallet_map["encrypted_seed"] = {};
+        wallet_map["creation_time"] = buf;
         wallet_map["network"] = joinparty::constants::bitcoin_network;
-        wallet_map["creation_time"] = creation_time;
-        // uncomment to create wallets with 5 mixdepths, like joinmarket
-        /* wallet_map["index_cache"] = "0,0|0,0|0,0|0,0|0,0"; */
-        wallet_map["index_cache"] = "0,0";
+        wallet_map["index_cache"] = "0,0|0,0|0,0|0,0|0,0";
         wallet_map["creator"] =
             "joinparty " + joinparty::constants::joinparty_version;
     }

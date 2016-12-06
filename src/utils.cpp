@@ -92,6 +92,43 @@ std::string bitcoin_address(const libbitcoin::chain::script& script)
     return script_address.encoded();
 }
 
+std::string to_string(const libbitcoin::chain::output& output)
+{
+    static constexpr auto flags = libbitcoin::machine::rule_fork::all_rules;
+
+    std::ostringstream text;
+    text << "\tvalue = " << output.value() << "\n"
+         << "\t" << output.script().to_string(flags) << "\n";
+
+    return text.str();
+}
+
+std::string to_string(const libbitcoin::chain::transaction& tx)
+{
+    static constexpr auto flags = libbitcoin::machine::rule_fork::all_rules;
+
+    std::ostringstream value;
+    value << "Transaction:\n" << "\tversion = " << tx.version() << "\n"
+          << "\tlocktime = " << tx.locktime() << "\nInputs:\n";
+
+    for (const auto& input: tx.inputs())
+    {
+        value << libbitcoin::encode_base16(input.previous_output().hash())
+              << ":" << input.previous_output().index() << "\n"
+              << "\t" << input.script().to_string(flags) << "\n"
+              << "\tsequence = " << input.sequence() << "\n";
+    }
+    value << "Outputs:\n";
+
+    for (const auto& output: tx.outputs())
+    {
+        value << to_string(output);
+    }
+    value << "\n";
+
+    return value.str();
+}
+
 void chunk_message(std::string message, size_t max_chunk_length,
     std::vector<std::string>& out_chunks)
 {

@@ -259,7 +259,7 @@ static bool broadcast_transaction(
         }
 
         logger.info("Transaction is", (ret ? "Valid" : "Invalid"));
-        logger.info(tx->to_string(0xFFFFFFFF));
+        logger.info(joinparty::utils::to_string(*tx));
 
         settings.irc_client->logout();
         return ret;
@@ -336,8 +336,7 @@ static bool construct_transaction(
         });
 
         logger.debug("Sending unsigned transaction now ...",
-            settings.coin_join_tx.to_string(0xFFFFFFFF));
-        logger.info("Sending unsigned transaction now ...");
+            joinparty::utils::to_string(settings.coin_join_tx));
 
         auto send_transaction = [&settings]()
         {
@@ -373,7 +372,6 @@ static bool construct_transaction(
         settings.min_num_maker_timer->async_wait(construct_tx);
 
         // drops through to waiting for more makers
-        // FIXME: needs to ignore all future calls to this when construct_tx is called
     }
 
     if (settings.num_maker_responses_remaining == 0)

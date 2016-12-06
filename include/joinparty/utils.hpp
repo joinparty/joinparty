@@ -58,6 +58,14 @@ std::string bitcoin_address(const libbitcoin::ec_secret& secret);
 std::string bitcoin_address(const libbitcoin::ec_compressed& point);
 std::string bitcoin_address(const libbitcoin::chain::script& script);
 
+// returns a string representation of an output suitable for
+// debugging/logging
+std::string to_string(const libbitcoin::chain::output& output);
+
+// returns a string representation of a transaction suitable for
+// debugging/logging
+std::string to_string(const libbitcoin::chain::transaction& tx);
+
 // splits a message into a vector of strings each not exceeding
 // max_chunk_length
 void chunk_message(std::string message, size_t max_chunk_length,

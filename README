@@ -205,12 +205,12 @@ joinparty/bin/joinparty -w wallet.json --list
 
 Joinparty implements a BIP32 HD Wallet and mimics the wallet used in
 Joinmarket.  For this project at the moment, all mix depths other than
-mix depth 0 are overkill and not needed (and by default are not
-displayed; but you can add as many as you'd like by editing your
-wallet.json file*).  Perhaps makers will be supported in the future,
-in which case additional mix depths will be used.  For now, the idea
-was to make the wallet similar to joinmarket so that users that were
-already familiar with joinmarket would feel more or less at home.
+mix depth 0 are perhaps overkill and not needed, but you can add as
+many as you'd like by editing your wallet.json file*).  Perhaps makers
+will be supported in the future, in which case additional mix depths
+will be used.  For now, the idea was to make the wallet similar to
+joinmarket so that users that were already familiar with joinmarket
+would feel more or less at home.
 
 * Specifically, edit the "index_cache":"0,0" section to have
   "index_cache":"0,0|0,0" for each additional mix depth you'd like.
