@@ -41,13 +41,13 @@ ICU_ARCHIVE="icu4c-55_1-src.tgz"
 
 # ZLib archive.
 #------------------------------------------------------------------------------
-ZLIB_URL="http://zlib.net/zlib-1.2.8.tar.xz"
-ZLIB_ARCHIVE="zlib-1.2.8.tar.xz"
+ZLIB_URL="https://github.com/madler/zlib/archive/v1.2.9.tar.gz"
+ZLIB_ARCHIVE="v1.2.9.tar.gz"
 
 # PNG archive.
 #------------------------------------------------------------------------------
-PNG_URL="http://downloads.sourceforge.net/project/libpng/libpng16/1.6.25/libpng-1.6.25.tar.xz"
-PNG_ARCHIVE="libpng-1.6.25.tar.xz"
+PNG_URL="http://downloads.sourceforge.net/project/libpng/libpng16/1.6.27/libpng-1.6.27.tar.xz"
+PNG_ARCHIVE="libpng-1.6.27.tar.xz"
 
 # QREncode archive.
 #------------------------------------------------------------------------------
@@ -56,10 +56,8 @@ QRENCODE_ARCHIVE="qrencode-3.4.4.tar.bz2"
 
 # Boost archive.
 #------------------------------------------------------------------------------
-#BOOST_URL="https://sourceforge.net/projects/boost/files/boost/1.55.0/boost_1_55_0.tar.bz2"
-#BOOST_ARCHIVE="boost_1_55_0.tar.bz2"
-BOOST_URL="https://sourceforge.net/projects/boost/files/boost/1.61.0/boost_1_61_0.tar.bz2"
-BOOST_ARCHIVE="boost_1_61_0.tar.bz2"
+BOOST_URL="http://downloads.sourceforge.net/project/boost/boost/1.57.0/boost_1_57_0.tar.bz2"
+BOOST_ARCHIVE="boost_1_57_0.tar.bz2"
 
 
 # Initialize the build environment.
@@ -74,8 +72,6 @@ SEQUENTIAL=1
 OS=`uname -s`
 if [[ $PARALLEL ]]; then
     echo "Using shell-defined PARALLEL value."
-elif [[ $TRAVIS == true ]]; then
-    PARALLEL=$SEQUENTIAL
 elif [[ $OS == Linux ]]; then
     PARALLEL=`nproc`
 elif [[ ($OS == Darwin) || ($OS == OpenBSD) ]]; then
@@ -274,7 +270,6 @@ BITCOIN_NETWORK_OPTIONS=(
 # Define bitcoin-explorer options.
 #------------------------------------------------------------------------------
 BITCOIN_EXPLORER_OPTIONS=(
-"--without-tests" \
 "${with_boost}" \
 "${with_pkgconfigdir}")
 
@@ -331,7 +326,6 @@ make_current_directory()
     local JOBS=$1
     shift 1
 
-    export PKG_CONFIG_PATH=$PKG_CONFIG_PATH
     ./autogen.sh
     configure_options "$@"
     make_jobs $JOBS
@@ -470,13 +464,14 @@ build_from_tarball()
 
     # Use the suffixed archive name as the extraction directory.
     local EXTRACT="build-$ARCHIVE"
-    create_directory $EXTRACT
-    push_directory $EXTRACT
+    push_directory "$BUILD_DIR"
+    create_directory "$EXTRACT"
+    push_directory "$EXTRACT"
 
     # Extract the source locally.
     wget --output-document $ARCHIVE $URL
     tar --extract --file $ARCHIVE --$COMPRESSION --strip-components=1
-    push_directory $PUSH_DIR
+    push_directory "$PUSH_DIR"
 
     # Enable static only zlib build.
     if [[ $ARCHIVE == $ZLIB_ARCHIVE ]]; then
@@ -502,6 +497,8 @@ build_from_tarball()
     # Restore flags to prevent side effects.
     export LDFLAGS=$SAVE_LDFLAGS
     export CPPFLAGS=$SAVE_LCPPFLAGS
+
+    pop_directory
 }
 
 # Because boost ICU detection assumes in incorrect ICU path.
@@ -587,8 +584,9 @@ build_from_tarball_boost()
 
     # Use the suffixed archive name as the extraction directory.
     local EXTRACT="build-$ARCHIVE"
-    create_directory $EXTRACT
-    push_directory $EXTRACT
+    push_directory "$BUILD_DIR"
+    create_directory "$EXTRACT"
+    push_directory "$EXTRACT"
 
     # Extract the source locally.
     wget --output-document $ARCHIVE $URL
@@ -652,35 +650,34 @@ build_from_tarball_boost()
         "$@"
 
     pop_directory
+    pop_directory
 }
 
 # Standard build from github.
 build_from_github()
 {
+    push_directory "$BUILD_DIR"
+
     local ACCOUNT=$1
     local REPO=$2
-#    local TAG=$3
     local BRANCH=$3
     local JOBS=$4
     local OPTIONS=$5
     shift 5
 
     FORK="$ACCOUNT/$REPO"
-    display_message "Download $FORK"
+    display_message "Download $FORK/$BRANCH"
 
     # Clone the repository locally.
-     git clone --branch $BRANCH --single-branch "https://github.com/$FORK"
-#    git clone "https://github.com/$FORK" $REPO
-#    pushd $REPO
-#    git checkout -b joinparty $TAG
-#    popd
+    git clone --depth 1 --branch $BRANCH --single-branch "https://github.com/$FORK"
 
     # Join generated and command line options.
     local CONFIGURATION=("${OPTIONS[@]}" "$@")
 
     # Build the local repository clone.
-    push_directory $REPO
+    push_directory "$REPO"
     make_current_directory $JOBS "${CONFIGURATION[@]}"
+    pop_directory
     pop_directory
 }
 
@@ -713,14 +710,14 @@ build_from_travis()
 
     # The primary build is not downloaded if we are running in Travis.
     if [[ $TRAVIS == true ]]; then
-        push_directory ".."
         build_from_local "Local $TRAVIS_REPO_SLUG" $JOBS "${OPTIONS[@]}" "$@"
         make_tests $JOBS
-        pop_directory
     else
         build_from_github $ACCOUNT $REPO $BRANCH $JOBS "${OPTIONS[@]}" "$@"
-        push_directory $REPO
+        push_directory "$BUILD_DIR"
+        push_directory "$REPO"
         make_tests $JOBS
+        pop_directory
         pop_directory
     fi
 }
@@ -731,18 +728,10 @@ build_from_travis()
 build_all()
 {
     build_from_tarball $ICU_URL $ICU_ARCHIVE gzip source $PARALLEL "$BUILD_ICU" "${ICU_OPTIONS[@]}" "$@"
-    build_from_tarball $ZLIB_URL $ZLIB_ARCHIVE xz . $PARALLEL "$BUILD_ZLIB" "${ZLIB_OPTIONS[@]}" "$@"
+    build_from_tarball $ZLIB_URL $ZLIB_ARCHIVE gzip . $PARALLEL "$BUILD_ZLIB" "${ZLIB_OPTIONS[@]}" "$@"
     build_from_tarball $PNG_URL $PNG_ARCHIVE xz . $PARALLEL "$BUILD_PNG" "${PNG_OPTIONS[@]}" "$@"
     build_from_tarball $QRENCODE_URL $QRENCODE_ARCHIVE bzip2 . $PARALLEL "$BUILD_QRENCODE" "${QRENCODE_OPTIONS[@]}" "$@"
     build_from_tarball_boost $BOOST_URL $BOOST_ARCHIVE bzip2 . $PARALLEL "$BUILD_BOOST" "${BOOST_OPTIONS[@]}"
-#    build_from_github zeromq libzmq fb34c3234d2c0ea7d2524572d59dc1fabfb162e6 $PARALLEL ${ZMQ_OPTIONS[@]} "$@"
-#    build_from_github libbitcoin secp256k1 3b0aa73f3d89e624177fa09771ab596e13d74ee0 $PARALLEL ${SECP256K1_OPTIONS[@]} "$@"
-#    build_from_github libbitcoin libbitcoin 3be40f2c8329fd0fa14612f0159c740ffd4187d7 $PARALLEL ${BITCOIN_OPTIONS[@]} "$@"
-#    build_from_github libbitcoin libbitcoin-protocol 61b9b4fd9949f9f407fb95b54f1fb58011e23b08 $PARALLEL ${BITCOIN_PROTOCOL_OPTIONS[@]} "$@"
-#    build_from_github libbitcoin libbitcoin-client d5618c533e0ca35c17b833d2e14ee0da86fafdc3 $PARALLEL ${BITCOIN_CLIENT_OPTIONS[@]} "$@"
-#    build_from_github libbitcoin libbitcoin-network d6b5ee6a932b59842956140dcece37e704b2cf1a $PARALLEL ${BITCOIN_NETWORK_OPTIONS[@]} "$@"
-#    build_from_travis libbitcoin libbitcoin-explorer feafaa0df21a7c9529f2dded149f8e351c9c7abe $PARALLEL ${BITCOIN_EXPLORER_OPTIONS[@]} "$@"
-
     build_from_github zeromq libzmq master $PARALLEL ${ZMQ_OPTIONS[@]} "$@"
     build_from_github libbitcoin secp256k1 version4 $PARALLEL ${SECP256K1_OPTIONS[@]} "$@"
     build_from_github libbitcoin libbitcoin master $PARALLEL ${BITCOIN_OPTIONS[@]} "$@"
@@ -758,5 +747,5 @@ build_all()
 create_directory "$BUILD_DIR"
 push_directory "$BUILD_DIR"
 initialize_git
-time build_all "${CONFIGURE_OPTIONS[@]}"
 pop_directory
+time build_all "${CONFIGURE_OPTIONS[@]}"

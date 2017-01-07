@@ -79,12 +79,16 @@ namespace joinparty
 
         keys_.reserve(max_mix_depth_);
         if (index_list_.size() == 0)
+        {
             index_list_.reserve(max_mix_depth_);
+        }
 
         for(auto i = 0; i < max_mix_depth_; i++)
         {
             if (index_list_.size() == 0)
+            {
                 index_list_.emplace_back(0, 0);
+            }
 
             const auto key = m_0_.derive_private(i);
             keys_.emplace_back(key.derive_private(0),
