@@ -2,7 +2,7 @@
  * This file is part of joinparty, a joinmarket compatible taker
  * client built on libbitcoin.
  * 
- * Copyright (C) 2016 Joinparty (joinparty@sigaint.org)
+ * Copyright (C) 2016-2017 Joinparty (joinparty@protonmail.com)
  *
  * Joinparty is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published
@@ -21,12 +21,10 @@
 #ifndef __ADDRESS_INFO_HPP
 #define __ADDRESS_INFO_HPP
 
+#include "constants.hpp"
+
 namespace joinparty
 {
-
-constexpr size_t num_confirmations = 6;
-constexpr size_t unspent_height = 4294967295;
-constexpr uint32_t unspent_index = 4294967295;
 
 struct AddressInfo
 {
@@ -51,7 +49,7 @@ struct AddressInfo
 
         bool confirmed(size_t height) const
         {
-            return (height >= output_height + num_confirmations);
+            return (height >= output_height + constants::num_confirmations);
         }
 
         bool operator==(const Transfer &other) const
@@ -78,9 +76,10 @@ struct AddressInfo
         for(const auto& transfer : transfers)
         {
             ret = true;
-            has_unspent = (transfer.spend.is_valid() &&
-                           (transfer.spend.index() == unspent_index) &&
-                           (transfer.spend_height == unspent_height));
+            has_unspent =
+                (transfer.spend.is_valid() &&
+                 (transfer.spend.index() == constants::unspent_index) &&
+                 (transfer.spend_height == constants::unspent_height));
             if (has_unspent)
             {
                 ret = false;

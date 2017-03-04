@@ -2,7 +2,7 @@
  * This file is part of joinparty, a joinmarket compatible taker
  * client built on libbitcoin.
  * 
- * Copyright (C) 2016 Joinparty (joinparty@sigaint.org)
+ * Copyright (C) 2016-2017 Joinparty (joinparty@protonmail.com)
  *
  * Joinparty is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published
@@ -30,12 +30,22 @@ namespace constants {
 const std::string joinparty_version = VERSION;
 
 const std::string bitcoin_network = "mainnet";
-constexpr uint32_t bip32_mainnet_public_version = 0x0488B21E;
-constexpr uint32_t bip32_mainnet_private_version = 0x0488ADE4;
+static constexpr uint32_t bip32_mainnet_public_version = 0x0488B21E;
+static constexpr uint32_t bip32_mainnet_private_version = 0x0488ADE4;
 
 // Testnet currently unsupported
-constexpr uint32_t bip32_testnet_public_version = 0x043587CF;
-constexpr uint32_t bip32_testnet_private_version =  0x04358394;
+static constexpr uint32_t bip32_testnet_public_version = 0x043587CF;
+static constexpr uint32_t bip32_testnet_private_version =  0x04358394;
+
+static constexpr int64_t max_int64 = std::numeric_limits<int64_t>::max();
+static constexpr uint64_t max_uint64 = std::numeric_limits<uint64_t>::max();
+
+static constexpr size_t num_confirmations = 6;
+
+static constexpr uint32_t unspent_index = std::numeric_limits<uint32_t>::max();
+
+static constexpr size_t unspent_height = std::numeric_limits<size_t>::max();
+
 
 } // namespace constants
 

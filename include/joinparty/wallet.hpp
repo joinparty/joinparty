@@ -2,7 +2,7 @@
  * This file is part of joinparty, a joinmarket compatible taker
  * client built on libbitcoin.
  * 
- * Copyright (C) 2016 Joinparty (joinparty@sigaint.org)
+ * Copyright (C) 2016-2017 Joinparty (joinparty@protonmail.com)
  *
  * Joinparty is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published
@@ -119,7 +119,7 @@ class Wallet
 
     // retrieves all utxos from this mix depth as well as the next
     // available change address for use
-    libbitcoin::chain::output_info::list get_unspent_outputs_for_mix_depth(
+    libbitcoin::chain::points_value get_unspent_outputs_for_mix_depth(
         const uint32_t mix_depth, UnspentList& unspent_list,     
         libbitcoin::wallet::payment_address& change_address,
         std::vector<std::string>* excluded = nullptr);

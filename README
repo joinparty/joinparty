@@ -22,7 +22,7 @@ little meaning without their sustained efforts.
   Contacting Joinparty
 ****************************
 
-Feel free to contact joinparty@sigaint.org
+Feel free to contact joinparty@protonmail.com
 
 As a free time project, user support will be very limited.
 

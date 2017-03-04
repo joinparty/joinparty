@@ -46,8 +46,8 @@ ZLIB_ARCHIVE="v1.2.9.tar.gz"
 
 # PNG archive.
 #------------------------------------------------------------------------------
-PNG_URL="http://downloads.sourceforge.net/project/libpng/libpng16/1.6.27/libpng-1.6.27.tar.xz"
-PNG_ARCHIVE="libpng-1.6.27.tar.xz"
+PNG_URL="http://downloads.sourceforge.net/project/libpng/libpng16/1.6.29/libpng-1.6.29.tar.xz"
+PNG_ARCHIVE="libpng-1.6.29.tar.xz"
 
 # QREncode archive.
 #------------------------------------------------------------------------------
@@ -734,11 +734,11 @@ build_all()
     build_from_tarball_boost $BOOST_URL $BOOST_ARCHIVE bzip2 . $PARALLEL "$BUILD_BOOST" "${BOOST_OPTIONS[@]}"
     build_from_github zeromq libzmq master $PARALLEL ${ZMQ_OPTIONS[@]} "$@"
     build_from_github libbitcoin secp256k1 version4 $PARALLEL ${SECP256K1_OPTIONS[@]} "$@"
-    build_from_github libbitcoin libbitcoin master $PARALLEL ${BITCOIN_OPTIONS[@]} "$@"
-    build_from_github libbitcoin libbitcoin-protocol master $PARALLEL ${BITCOIN_PROTOCOL_OPTIONS[@]} "$@"
-    build_from_github libbitcoin libbitcoin-client master $PARALLEL ${BITCOIN_CLIENT_OPTIONS[@]} "$@"
-    build_from_github libbitcoin libbitcoin-network master $PARALLEL ${BITCOIN_NETWORK_OPTIONS[@]} "$@"
-    build_from_travis libbitcoin libbitcoin-explorer master $PARALLEL ${BITCOIN_EXPLORER_OPTIONS[@]} "$@"
+    build_from_github libbitcoin libbitcoin version3 $PARALLEL ${BITCOIN_OPTIONS[@]} "$@"
+    build_from_github libbitcoin libbitcoin-protocol version3 $PARALLEL ${BITCOIN_PROTOCOL_OPTIONS[@]} "$@"
+    build_from_github libbitcoin libbitcoin-client version3 $PARALLEL ${BITCOIN_CLIENT_OPTIONS[@]} "$@"
+    build_from_github libbitcoin libbitcoin-network version3 $PARALLEL ${BITCOIN_NETWORK_OPTIONS[@]} "$@"
+    build_from_travis libbitcoin libbitcoin-explorer version3 $PARALLEL ${BITCOIN_EXPLORER_OPTIONS[@]} "$@"
 }
 
 

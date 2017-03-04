@@ -2,7 +2,7 @@
  * This file is part of joinparty, a joinmarket compatible taker
  * client built on libbitcoin.
  * 
- * Copyright (C) 2016 Joinparty (joinparty@sigaint.org)
+ * Copyright (C) 2016-2017 Joinparty (joinparty@protonmail.com)
  *
  * Joinparty is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published
@@ -37,12 +37,13 @@ static const std::vector<std::string> libbitcoin_server_addresses
 {
     // HELP WANTED: add any known stable/reliable libbitcoin servers
     // to this list
+    "tcp://mainnet1.libbitcoin.net:9091",
+    "tcp://mainnet2.libbitcoin.net:9091",
+    "tcp://mainnet3.libbitcoin.net:9091",
     "tcp://libbitcoin1.openbazaar.org:9091",
     "tcp://libbitcoin2.openbazaar.org:9091",
-    "tcp://libbitcoin1.thecodefactory.org:9091",
-    "tcp://libbitcoin2.thecodefactory.org:9091",
+    "tcp://libbitcoin3.openbazaar.org:9091",
 // these servers appear to be down
-//    "tcp://libbitcoin3.openbazaar.org:9091",
 //    "tcp://obelisk.airbitz.co:9091",
 };
 
@@ -237,8 +238,7 @@ static bool broadcast_transaction(
     if (--settings.num_maker_responses_remaining == 0)
     {
         logger.debug(
-            "Time to validate and broadcast transaction with hash:",
-                libbitcoin::encode_base16(tx->hash()));
+            "Time to validate and broadcast transaction");
 
         JP_ASSERT(tx == &settings.coin_join_tx);
         settings.wallet->sign_transaction_inputs(

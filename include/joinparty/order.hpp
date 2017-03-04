@@ -2,7 +2,7 @@
  * This file is part of joinparty, a joinmarket compatible taker
  * client built on libbitcoin.
  * 
- * Copyright (C) 2016 Joinparty (joinparty@sigaint.org)
+ * Copyright (C) 2016-2017 Joinparty (joinparty@protonmail.com)
  *
  * Joinparty is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published

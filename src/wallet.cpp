@@ -2,7 +2,7 @@
  * This file is part of joinparty, a joinmarket compatible taker
  * client built on libbitcoin.
  * 
- * Copyright (C) 2016 Joinparty (joinparty@sigaint.org)
+ * Copyright (C) 2016-2017 Joinparty (joinparty@protonmail.com)
  *
  * Joinparty is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published
@@ -244,16 +244,17 @@ namespace joinparty
         UnspentList unspent_list;
         auto unspent = get_unspent_outputs_for_mix_depth(
             mix_depth, unspent_list, change_address, excluded);
-        JP_ASSERT(unspent.size() == unspent_list.size());
+        JP_ASSERT(unspent.points.size() == unspent_list.size());
 
         if (amount > 0)
         {
-            libbitcoin::chain::points_info selected;
+            libbitcoin::chain::points_value selected{};
             libbitcoin::wallet::select_outputs::select(selected, unspent, amount);
+            auto change_amount = selected.value() - amount;
 
             logger.info(
                 "Retrieved", selected.points.size(), "selected points from "
-                "unspent list with change of", selected.change, "btc");
+                "unspent list with change of", change_amount, "btc");
 
             if (!selected.points.size())
             {
@@ -264,11 +265,14 @@ namespace joinparty
             // matching the selected outputs
             UnspentList selected_unspent_list;
             selected_unspent_list.reserve(selected.points.size());
-            for(const auto& selected_point : selected.points)
+            for(auto& selected_point : selected.points)
             {
+                libbitcoin::chain::output_point output_point(
+                    std::move(selected_point));
+
                 for(const auto& unspent : unspent_list)
                 {
-                    if (selected_point == unspent.second.output)
+                    if (output_point == unspent.second.output)
                     {
                         selected_unspent_list.push_back(unspent);
                         break;
@@ -285,7 +289,6 @@ namespace joinparty
 
             // set change amount and swap newly created unspent list with
             // the outgoing parameter
-            change_amount = selected.change;
             selected_unspent.swap(selected_unspent_list);
 
             return selected_unspent.size() == selected.points.size();
@@ -593,13 +596,13 @@ namespace joinparty
         return ret;
     }
 
-    libbitcoin::chain::output_info::list Wallet::get_unspent_outputs_for_mix_depth(
+    libbitcoin::chain::points_value Wallet::get_unspent_outputs_for_mix_depth(
         const uint32_t mix_depth, UnspentList& unspent_list,
         libbitcoin::wallet::payment_address& change_address,
         std::vector<std::string>* excluded)
     {
         auto assigned_change_address = false;
-        libbitcoin::chain::output_info::list unspent{};
+        libbitcoin::chain::points_value unspent{};
 
         const auto cur_index = index_list_[mix_depth];
         const auto cur_height = get_current_block_height();
@@ -676,7 +679,7 @@ namespace joinparty
                                 transfer.output.hash()), "and value",
                                     transfer.value);
 
-                        unspent.push_back({transfer.output, transfer.value});
+                        unspent.points.push_back({transfer.output, transfer.value});
                         unspent_list.push_back({key, transfer});
                     }
                 }
@@ -878,8 +881,8 @@ namespace joinparty
 
             for(const auto& row : rows)
             {
-                if ((row.spend_height == joinparty::unspent_height) &&
-                    (row.spend.index() == unspent_index))
+                if ((row.spend_height == constants::unspent_height) &&
+                    (row.spend.index() == constants::unspent_index))
                 {
                     address_info.total_value += row.value;
                 }
@@ -905,7 +908,7 @@ namespace joinparty
             }
         };
 
-        client_.address_fetch_history(on_error, on_done, address);
+        client_.blockchain_fetch_history3(on_error, on_done, address);
         client_.wait();
 
         return ret;
@@ -929,7 +932,7 @@ namespace joinparty
                 }
 
                 if (row.output_height != 0 &&
-                    (row.spend.hash() == null_hash || row.spend_height == 0))
+                    (row.spend.index() == constants::unspent_index))
                 {
                     balance.confirmed += row.value;
                 }
@@ -944,7 +947,7 @@ namespace joinparty
             throw std::runtime_error("Failed to retrieve address balance");
         };
 
-        client_.address_fetch_history2(on_error, on_done, address);
+        client_.blockchain_fetch_history3(on_error, on_done, address);
         client_.wait();
 
         return balance;
@@ -974,8 +977,6 @@ namespace joinparty
         const hash_digest& tx_hash, libbitcoin::chain::transaction& output_tx)
     {
         auto ret = false;
-        size_t cur_height = 0;
-        const auto str_hash = libbitcoin::encode_base16(tx_hash);
         memset(&output_tx, 0, sizeof(output_tx));
 
         auto on_done = [&](const libbitcoin::chain::transaction& tx)
@@ -1000,10 +1001,9 @@ namespace joinparty
     {
         bool ret = false;
 
-        auto on_done = [&ret](
-            const libbitcoin::chain::point::indexes& indexes)
+        auto on_done = [&ret](const code& error)
         {
-            ret = (indexes.empty() ? true : false);
+            ret = (error == libbitcoin::error::success);
         };
 
         auto on_error = [&transaction](const code& error)
@@ -1015,7 +1015,7 @@ namespace joinparty
                 joinparty::utils::to_string(transaction));
         };
 
-        client_.transaction_pool_validate(on_error, on_done, transaction);
+        client_.transaction_pool_validate2(on_error, on_done, transaction);
         client_.wait();
 
         return ret;
@@ -1026,10 +1026,13 @@ namespace joinparty
     {
         bool ret = false;
 
-        auto on_done = [&ret]()
+        auto on_done = [&ret](const code& error)
         {
-            logger.info("Payment has been sent");
-            ret = true;
+            if (!error)
+            {
+                logger.info("Payment has been sent");
+                ret = true;
+            }
         };
 
         auto on_error = [](const code& error)
@@ -1038,7 +1041,7 @@ namespace joinparty
                 "Failed to broadcast transaction ", error.message());
         };
 
-        client_.protocol_broadcast_transaction(on_error, on_done, transaction);
+        client_.transaction_pool_broadcast(on_error, on_done, transaction);
         client_.wait();
 
         return ret;
